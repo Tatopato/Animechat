@@ -83,7 +83,10 @@ class _LoginScreenState extends State<LoginScreen>
       body: Stack(
         children: [
           const Positioned.fill(
-            child: AnimeAuthBackground(images: _backgrounds),
+            child: AnimeAuthBackground(
+              images: _backgrounds,
+              petals: false,
+            ),
           ),
           SafeArea(
             child: Center(
@@ -206,7 +209,6 @@ class _LoginScreenState extends State<LoginScreen>
         const SizedBox(height: 18),
         AnimeButton(
           label: 'LOGIN',
-          jpLabel: 'ログイン',
           loading: _isSubmitting,
           onPressed: _isSubmitting ? null : _signIn,
         ),

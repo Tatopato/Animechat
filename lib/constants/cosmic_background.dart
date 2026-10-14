@@ -104,7 +104,7 @@ class _CosmicBackgroundState extends State<CosmicBackground>
                 animation: _controller,
                 builder: (context, _) {
                   return CustomPaint(
-                    painter: StarfieldPainter(_controller.value, _stars),
+                    painter: _StarfieldPainter(_controller.value, _stars),
                   );
                 },
               ),
@@ -122,15 +122,15 @@ class _CosmicBackgroundState extends State<CosmicBackground>
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: RadialGradient(
-          colors: [color.withOpacity(0.35), color.withOpacity(0.0)],
+          colors: [color.withValues(alpha: 0.35), color.withValues(alpha: 0.0)],
         ),
       ),
     );
   }
 }
 
-class StarfieldPainter extends CustomPainter {
-  StarfieldPainter(this.progress, this.stars);
+class _StarfieldPainter extends CustomPainter {
+  _StarfieldPainter(this.progress, this.stars);
 
   final double progress;
   final List<_Star> stars;
@@ -140,7 +140,7 @@ class StarfieldPainter extends CustomPainter {
     final paint = Paint()..color = Colors.white;
     for (final star in stars) {
       final twinkle = (sin((progress + star.phase) * 2 * pi) + 1) / 2;
-      paint.color = Colors.white.withOpacity(0.25 + twinkle * 0.65);
+      paint.color = Colors.white.withValues(alpha: 0.25 + twinkle * 0.65);
       canvas.drawCircle(
         Offset(star.dx * size.width, star.dy * size.height),
         star.radius,
@@ -150,7 +150,7 @@ class StarfieldPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant StarfieldPainter oldDelegate) =>
+  bool shouldRepaint(covariant _StarfieldPainter oldDelegate) =>
       oldDelegate.progress != progress;
 }
 

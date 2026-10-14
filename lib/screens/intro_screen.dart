@@ -105,7 +105,7 @@ class _IntroScreenState extends State<IntroScreen> {
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 500),
-        pageBuilder: (_, animation, __) => FadeTransition(
+        pageBuilder: (_, animation, _) => FadeTransition(
           opacity: animation,
           child: const LoginScreen(),
         ),
@@ -138,7 +138,7 @@ class _IntroScreenState extends State<IntroScreen> {
                         child: Text(
                           'Skip',
                           style: TextStyle(
-                            color: Colors.white.withOpacity(0.6),
+                            color: Colors.white.withValues(alpha: 0.6),
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -195,11 +195,11 @@ class _IntroScreenState extends State<IntroScreen> {
           width: active ? 24 : 8,
           height: 8,
           decoration: BoxDecoration(
-            color: active ? accent : Colors.white.withOpacity(0.25),
+            color: active ? accent : Colors.white.withValues(alpha: 0.25),
             borderRadius: BorderRadius.circular(6),
             boxShadow: [
               BoxShadow(
-                color: accent.withOpacity(active ? 0.6 : 0.0),
+                color: accent.withValues(alpha: active ? 0.6 : 0.0),
                 blurRadius: active ? 10 : 0,
               ),
             ],
@@ -233,7 +233,7 @@ class _IntroScreenState extends State<IntroScreen> {
                         onPressed: _onBack,
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white70,
-                          side: BorderSide(color: Colors.white.withOpacity(0.2)),
+                          side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16),
                           ),
@@ -263,7 +263,7 @@ class _IntroScreenState extends State<IntroScreen> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ).copyWith(
-                    shadowColor: WidgetStateProperty.all(accent.withOpacity(0.5)),
+                    shadowColor: WidgetStateProperty.all(accent.withValues(alpha: 0.5)),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -330,11 +330,11 @@ class _IntroSlideView extends StatelessWidget {
                 height: 260,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(28),
-                  color: Colors.white.withOpacity(0.06),
-                  border: Border.all(color: accentColor.withOpacity(0.35)),
+                  color: Colors.white.withValues(alpha: 0.06),
+                  border: Border.all(color: accentColor.withValues(alpha: 0.35)),
                   boxShadow: [
                     BoxShadow(
-                      color: accentColor.withOpacity(0.35),
+                      color: accentColor.withValues(alpha: 0.35),
                       blurRadius: 40,
                       spreadRadius: 4,
                     ),
@@ -351,7 +351,7 @@ class _IntroSlideView extends StatelessWidget {
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                             colors: [
-                              accentColor.withOpacity(0.25),
+                              accentColor.withValues(alpha: 0.25),
                               Colors.transparent,
                             ],
                           ),
@@ -365,7 +365,7 @@ class _IntroSlideView extends StatelessWidget {
                             child: Icon(
                               Icons.image_outlined,
                               size: 56,
-                              color: Colors.white.withOpacity(0.25),
+                              color: Colors.white.withValues(alpha: 0.25),
                             ),
                           );
                         },
@@ -385,7 +385,7 @@ class _IntroSlideView extends StatelessWidget {
                     color: accentColor,
                     border: Border.all(color: const Color(0xFF171A3D), width: 3),
                     boxShadow: [
-                      BoxShadow(color: accentColor.withOpacity(0.6), blurRadius: 14),
+                      BoxShadow(color: accentColor.withValues(alpha: 0.6), blurRadius: 14),
                     ],
                   ),
                   child: Icon(slide.badgeIcon, color: Colors.white, size: 22),
@@ -406,7 +406,7 @@ class _IntroSlideView extends StatelessWidget {
             style: TextStyle(
               fontSize: 14,
               height: 1.5,
-              color: Colors.white.withOpacity(0.55),
+              color: Colors.white.withValues(alpha: 0.55),
             ),
           ),
         ],

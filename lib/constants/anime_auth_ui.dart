@@ -58,9 +58,16 @@ class AnimeFonts {
 // ---------------------------------------------------------------------------
 
 class AnimeAuthBackground extends StatefulWidget {
-  const AnimeAuthBackground({super.key, required this.images});
+  const AnimeAuthBackground({
+    super.key,
+    required this.images,
+    this.petals = true,
+  });
 
   final List<String> images;
+
+  /// Falling sakura petals on top of the slideshow.
+  final bool petals;
 
   @override
   State<AnimeAuthBackground> createState() => _AnimeAuthBackgroundState();
@@ -138,16 +145,17 @@ class _AnimeAuthBackgroundState extends State<AnimeAuthBackground>
             ),
           ),
         ),
-        RepaintBoundary(
-          child: SizedBox.expand(
-            child: AnimatedBuilder(
-              animation: _petalController,
-              builder: (context, _) => CustomPaint(
-                painter: _SakuraPainter(_petalController.value),
+        if (widget.petals)
+          RepaintBoundary(
+            child: SizedBox.expand(
+              child: AnimatedBuilder(
+                animation: _petalController,
+                builder: (context, _) => CustomPaint(
+                  painter: _SakuraPainter(_petalController.value),
+                ),
               ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -412,12 +420,13 @@ class AnimePosterFan extends StatelessWidget {
 class AnimeHeading extends StatelessWidget {
   const AnimeHeading({
     super.key,
-    required this.jp,
+    this.jp,
     required this.title,
     required this.subtitle,
   });
 
-  final String jp;
+  /// Optional Japanese tag shown above the title.
+  final String? jp;
   final String title;
   final String subtitle;
 
@@ -425,25 +434,27 @@ class AnimeHeading extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          decoration: BoxDecoration(
-            color: AnimePalette.cyan.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: AnimePalette.cyan.withValues(alpha: 0.55),
+        if (jp != null) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            decoration: BoxDecoration(
+              color: AnimePalette.cyan.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: AnimePalette.cyan.withValues(alpha: 0.55),
+              ),
+            ),
+            child: Text(
+              jp!,
+              style: AnimeFonts.body(
+                size: 13,
+                color: AnimePalette.cyan,
+                weight: FontWeight.w700,
+              ).copyWith(letterSpacing: 1.5),
             ),
           ),
-          child: Text(
-            jp,
-            style: AnimeFonts.body(
-              size: 13,
-              color: AnimePalette.cyan,
-              weight: FontWeight.w700,
-            ).copyWith(letterSpacing: 1.5),
-          ),
-        ),
-        const SizedBox(height: 14),
+          const SizedBox(height: 14),
+        ],
         Text(
           title,
           textAlign: TextAlign.center,
@@ -586,13 +597,13 @@ class AnimeButton extends StatelessWidget {
   const AnimeButton({
     super.key,
     required this.label,
-    required this.jpLabel,
+    this.jpLabel,
     required this.onPressed,
     this.loading = false,
   });
 
   final String label;
-  final String jpLabel;
+  final String? jpLabel;
   final VoidCallback? onPressed;
   final bool loading;
 
@@ -647,15 +658,17 @@ class AnimeButton extends StatelessWidget {
                             letterSpacing: 2,
                           ),
                         ),
-                        const SizedBox(width: 10),
-                        Text(
-                          jpLabel,
-                          style: AnimeFonts.body(
-                            size: 12,
-                            color: Colors.white70,
-                            weight: FontWeight.w700,
+                        if (jpLabel != null) ...[
+                          const SizedBox(width: 10),
+                          Text(
+                            jpLabel!,
+                            style: AnimeFonts.body(
+                              size: 12,
+                              color: Colors.white70,
+                              weight: FontWeight.w700,
+                            ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
             ),
@@ -756,8 +769,8 @@ void showAnimeSnackBar(BuildContext context, String message) {
 Route<T> animeFadeRoute<T>(Widget page) {
   return PageRouteBuilder<T>(
     transitionDuration: const Duration(milliseconds: 450),
-    pageBuilder: (_, __, ___) => page,
-    transitionsBuilder: (_, animation, __, child) =>
+    pageBuilder: (_, _, _) => page,
+    transitionsBuilder: (_, animation, _, child) =>
         FadeTransition(opacity: animation, child: child),
   );
 }

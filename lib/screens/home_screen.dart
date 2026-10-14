@@ -1,14 +1,19 @@
+import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
+import 'package:flutter/services.dart';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../constants/account_menu.dart';
 import '../constants/minimal_ui.dart';
 import '../data/anime_catalog.dart';
 import '../services/user_data_service.dart';
+import 'public_profile_screen.dart';
+import '../services/anime_catalog_service.dart';
+import '../services/theme_controller.dart';
 
 /// Home: greeting, trending anime (favorite with the heart) and the public
 /// community feed. Posts from every account appear here in real time;
@@ -22,37 +27,72 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _service = UserDataService.instance;
+  final _trendingController = ScrollController();
 
   late final Stream<UserProfile> _profile = _service.profileStream();
+  late final Stream<UserProfile> _composerProfile = _service.profileStream();
   late final Stream<Set<String>> _favorites = _service.favoriteIdsStream();
-  late final Stream<List<UserPost>> _posts = _service.feedStream();
+  late Stream<List<UserPost>> _posts = _service.feedStream();
+  late Future<List<Anime>> _trending = AnimeCatalogService.instance.topAnime();
+  String? _selectedTrendingGenre;
+
+  void _onThemeChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    ThemeController.isDarkMode.addListener(_onThemeChanged);
+  }
+
+  @override
+  void dispose() {
+    ThemeController.isDarkMode.removeListener(_onThemeChanged);
+    _trendingController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Mi.bg,
-      body: SafeArea(
-        bottom: false,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-          children: [
-            _buildHeader(),
-            const SizedBox(height: 28),
-            const MiSectionHeader(title: 'Trending'),
-            const SizedBox(height: 12),
-            _buildTrending(),
-            const SizedBox(height: 28),
-            MiSectionHeader(
-              title: 'Community',
-              actionLabel: '+ New post',
-              onAction: _openNewPost,
-            ),
-            const SizedBox(height: 12),
-            _buildPosts(),
-          ],
+      body: MiBackdrop(
+        child: SafeArea(
+          bottom: false,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+            children: [
+              _buildHeader(),
+              const SizedBox(height: 28),
+              Row(children: [
+                const Expanded(child: MiSectionHeader(title: 'Trending on AniList')),
+                IconButton(tooltip: 'Scroll left', onPressed: () => _scrollTrending(-220), icon: Icon(Icons.chevron_left_rounded, color: Mi.sub)),
+                IconButton(tooltip: 'Scroll right', onPressed: () => _scrollTrending(220), icon: Icon(Icons.chevron_right_rounded, color: Mi.sub)),
+                IconButton(tooltip: 'Refresh anime', onPressed: () => setState(() => _trending = AnimeCatalogService.instance.topAnime(refresh: true)), icon: Icon(Icons.refresh_rounded, color: Mi.sub)),
+              ]),
+              const SizedBox(height: 14),
+              _buildTrending(),
+              const SizedBox(height: 28),
+              const MiSectionHeader(title: 'Community'),
+              const SizedBox(height: 14),
+              _buildComposer(),
+              const SizedBox(height: 14),
+              _buildPosts(),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  void _scrollTrending(double offset) {
+    if (!_trendingController.hasClients) return;
+    final position = _trendingController.position;
+    final target = (position.pixels + offset)
+        .clamp(position.minScrollExtent, position.maxScrollExtent)
+        .toDouble();
+    _trendingController.animateTo(target, duration: const Duration(milliseconds: 260), curve: Curves.easeOutCubic);
   }
 
   // ---------------------------------------------------------------- header
@@ -67,21 +107,120 @@ class _HomeScreenState extends State<HomeScreen> {
         return Row(
           children: [
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Hello,', style: Mi.caption()),
-                  Text(
-                    profile?.displayName ?? 'Anime Fan',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Mi.title(size: 26),
+              child: Row(children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    gradient: Mi.brand,
+                    borderRadius: BorderRadius.circular(15),
+                    boxShadow: const [
+                      BoxShadow(color: Color(0x337B61D1), blurRadius: 12, offset: Offset(0, 4)),
+                    ],
                   ),
-                ],
-              ),
+                  child: const Icon(Icons.forum_rounded, color: Colors.white, size: 22),
+                ),
+                const SizedBox(width: 11),
+                Flexible(
+                  child: ShaderMask(
+                    shaderCallback: (bounds) => Mi.brand.createShader(bounds),
+                    child: Text(
+                      'Anime Chat',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Mi.title(size: 24).copyWith(color: Colors.white, letterSpacing: -.4),
+                    ),
+                  ),
+                ),
+              ]),
             ),
-            if (profile != null) UserAvatar(profile: profile, size: 46),
+            IconButton(
+              tooltip: 'Search anime',
+              onPressed: _openAnimeSearch,
+              icon: Icon(Icons.search_rounded, color: Mi.sub),
+            ),
+            if (profile != null) AccountMenuButton(profile: profile, size: 46),
+            const SizedBox(width: 4),
+            StreamBuilder<List<Map<String, dynamic>>>(
+              stream: _service.notificationsStream(),
+              builder: (context, snapshot) {
+                final unread = (snapshot.data ?? const []).where((n) => n['read'] != true).length;
+                return Badge(isLabelVisible: unread > 0, label: Text('$unread'), child: IconButton(icon: Icon(Icons.notifications_none_rounded, color: Mi.sub), onPressed: () => _showNotifications(snapshot.data ?? const [])));
+              },
+            ),
           ],
+        );
+      },
+    );
+  }
+
+  void _showNotifications(List<Map<String, dynamic>> notifications) {
+    showModalBottomSheet<void>(context: context, backgroundColor: Mi.surface, showDragHandle: true, builder: (sheetContext) => SafeArea(child: ListView(padding: const EdgeInsets.all(16), shrinkWrap: true, children: [Text('Notifications', style: Mi.title(size: 20)), const SizedBox(height: 8), if (notifications.isEmpty) Text('No notifications yet.', style: Mi.caption()), for (final item in notifications) ListTile(leading: const Icon(Icons.mode_comment_outlined, color: Mi.accent), title: Text('${item['fromName'] ?? 'Someone'} commented on your post', style: Mi.body()), subtitle: Text('${item['text'] ?? ''}', maxLines: 2, overflow: TextOverflow.ellipsis, style: Mi.caption()), onTap: () => _service.markNotificationRead(item['id'] as String))])));
+  }
+
+  void _openAnimeSearch() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => _AnimeQuickSearchDialog(
+        onSelected: (anime) {
+          Navigator.of(dialogContext).pop();
+          showAnimeSheet(context, anime);
+        },
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------- composer
+
+  Widget _buildComposer() {
+    final user = FirebaseAuth.instance.currentUser;
+    return StreamBuilder<UserProfile>(
+      stream: _composerProfile,
+      initialData: user == null ? null : UserProfile.fromData(null, user),
+      builder: (context, snapshot) {
+        final profile = snapshot.data;
+        return GestureDetector(
+          onTap: _openNewPost,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
+            decoration: Mi.card(radius: 20),
+            child: Row(
+              children: [
+                if (profile != null) UserAvatar(profile: profile, size: 38),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 11,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Mi.bg,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'What are you watching?',
+                      style: Mi.body(color: Mi.sub),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: Mi.brand,
+                  ),
+                  child: const Icon(
+                    Icons.add_photo_alternate_outlined,
+                    size: 20,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );
@@ -95,28 +234,99 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context, snapshot) {
         if (snapshot.hasError) return const MiDataError();
         final favorites = snapshot.data ?? const <String>{};
-        return SizedBox(
-          height: 275,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            clipBehavior: Clip.none,
-            itemCount: animeCatalog.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 14),
-            itemBuilder: (context, index) {
-              final anime = animeCatalog[index];
-              return SizedBox(
-                width: 128,
-                child: AnimeTile(
-                  anime: anime,
-                  isFavorite: favorites.contains(anime.id),
-                ),
-              );
-            },
-          ),
+        return FutureBuilder<List<Anime>>(
+          future: _trending,
+          builder: (context, animeSnapshot) {
+            if (animeSnapshot.hasError) return MiEmpty(icon: Icons.cloud_off_rounded, text: 'โหลดอนิเมะไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่', actionLabel: 'ลองอีกครั้ง', onAction: () => setState(() => _trending = AnimeCatalogService.instance.topAnime(refresh: true)));
+            if (!animeSnapshot.hasData) return _trendingSkeleton();
+            final animeList = animeSnapshot.data!;
+            if (animeList.isEmpty) return const MiEmpty(icon: Icons.movie_outlined, text: 'No anime found.');
+            final genres = animeList.expand((anime) => anime.genres).toSet().toList()..sort();
+            final visibleAnime = _selectedTrendingGenre == null
+                ? animeList
+                : animeList.where((anime) => anime.genres.contains(_selectedTrendingGenre)).toList();
+            return SizedBox(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                if (genres.isNotEmpty) ...[
+                  SizedBox(
+                    height: 38,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        _trendingGenreChip('All', null),
+                        for (final genre in genres) _trendingGenreChip(genre, genre),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (visibleAnime.isEmpty)
+                  const SizedBox(height: 120, child: Center(child: Text('No anime in this genre yet.')))
+                else
+                  SizedBox(
+                    height: 310,
+                    child: ListView.separated(
+                      controller: _trendingController,
+                      physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                      scrollDirection: Axis.horizontal,
+                      clipBehavior: Clip.none,
+                      itemCount: visibleAnime.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 14),
+                      itemBuilder: (context, index) {
+                        final anime = visibleAnime[index];
+                        return SizedBox(
+                          width: 128,
+                          child: AnimeTile(anime: anime, isFavorite: favorites.contains(anime.id)),
+                        );
+                      },
+                    ),
+                  ),
+              ]),
+            );
+          },
         );
       },
     );
   }
+
+  Widget _trendingGenreChip(String label, String? genre) => Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: ChoiceChip(
+          label: Text(label),
+          selected: _selectedTrendingGenre == genre,
+          onSelected: (_) => setState(() => _selectedTrendingGenre = genre),
+          labelStyle: Mi.body(
+            size: 12,
+            color: _selectedTrendingGenre == genre ? Colors.white : Mi.text,
+            weight: FontWeight.w600,
+          ),
+          selectedColor: Mi.violet,
+          backgroundColor: Mi.surface,
+          side: BorderSide(color: _selectedTrendingGenre == genre ? Mi.violet : Mi.line),
+          visualDensity: VisualDensity.compact,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+      );
+
+  Widget _trendingSkeleton() => SizedBox(
+        height: 310,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: 4,
+          separatorBuilder: (_, _) => const SizedBox(width: 14),
+          itemBuilder: (_, _) => SizedBox(
+            width: 128,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const MiSkeletonBlock(width: 128, height: 190, radius: 14),
+              const SizedBox(height: 10),
+              const MiSkeletonBlock(width: 108, height: 12),
+              const SizedBox(height: 7),
+              const MiSkeletonBlock(width: 78, height: 10),
+            ]),
+          ),
+        ),
+      );
 
   // ----------------------------------------------------------------- posts
 
@@ -124,8 +334,12 @@ class _HomeScreenState extends State<HomeScreen> {
     return StreamBuilder<List<UserPost>>(
       stream: _posts,
       builder: (context, snapshot) {
-        if (snapshot.hasError) return const MiDataError();
-        if (!snapshot.hasData) return const MiLoading();
+        if (snapshot.hasError) {
+          return MiDataError(
+            onRetry: () => setState(() => _posts = _service.feedStream()),
+          );
+        }
+        if (!snapshot.hasData) return const MiFeedSkeleton();
 
         final posts = snapshot.data!;
         if (posts.isEmpty) {
@@ -142,6 +356,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _PostCard(
                 post: post,
                 onDelete: () => _deletePost(post),
+                onEdit: () => showEditPostSheet(context, post),
               ),
               const SizedBox(height: 14),
             ],
@@ -173,19 +388,107 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+class _AnimeQuickSearchDialog extends StatefulWidget {
+  const _AnimeQuickSearchDialog({required this.onSelected});
+  final ValueChanged<Anime> onSelected;
+  @override
+  State<_AnimeQuickSearchDialog> createState() => _AnimeQuickSearchDialogState();
+}
+
+class _AnimeQuickSearchDialogState extends State<_AnimeQuickSearchDialog> {
+  Timer? _debounce;
+  final TextEditingController _searchController = TextEditingController();
+  Future<List<Anime>>? _results = AnimeCatalogService.instance.topAnime();
+
+  void _search(String term) {
+    _debounce?.cancel();
+    if (term.trim().isEmpty) {
+      setState(() => _results = AnimeCatalogService.instance.topAnime());
+      return;
+    }
+    setState(() => _results = null);
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) setState(() => _results = AnimeCatalogService.instance.searchAnime(term));
+    });
+  }
+
+  @override
+  void dispose() { _debounce?.cancel(); _searchController.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) => Dialog(
+        backgroundColor: Mi.surface,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520, maxHeight: 620),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(children: [
+              TextField(
+                autofocus: true,
+                controller: _searchController,
+                onChanged: _search,
+                decoration: const InputDecoration(prefixIcon: Icon(Icons.search_rounded), hintText: 'Search anime title', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 12),
+              Expanded(child: _results == null
+                ? const Center(child: CircularProgressIndicator())
+                : FutureBuilder<List<Anime>>(
+                    future: _results,
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return MiEmpty(
+                          icon: Icons.cloud_off_rounded,
+                          text: 'ค้นหาอนิเมะไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่',
+                          actionLabel: 'ลองอีกครั้ง',
+                          onAction: () => setState(() => _results = _searchController.text.trim().isEmpty
+                              ? AnimeCatalogService.instance.topAnime(refresh: true)
+                              : AnimeCatalogService.instance.searchAnime(_searchController.text, refresh: true)),
+                        );
+                      }
+                      if (!snapshot.hasData) return const MiLoading();
+                      if (snapshot.data!.isEmpty) return Center(child: Text('No anime found.', style: Mi.caption()));
+                      return ListView.builder(
+                        itemCount: snapshot.data!.length,
+                        itemBuilder: (context, index) {
+                          final anime = snapshot.data![index];
+                          return ListTile(
+                            leading: ClipRRect(borderRadius: BorderRadius.circular(6), child: Image.network(anime.imageUrl, width: 40, height: 56, fit: BoxFit.cover, errorBuilder: (_, _, _) => const SizedBox(width: 40, height: 56))),
+                            title: Text(anime.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: Mi.body(weight: FontWeight.w700)),
+                            subtitle: Text('★ ${anime.score?.toStringAsFixed(1) ?? '—'} · ${anime.episodes ?? 'TBA'} episodes', style: Mi.caption()),
+                            trailing: const Icon(Icons.chevron_right_rounded),
+                            onTap: () => widget.onSelected(anime),
+                          );
+                        },
+                      );
+                    },
+                  )),
+            ]),
+          ),
+        ),
+      );
+}
+
 // ---------------------------------------------------------------------------
 // Post card
 // ---------------------------------------------------------------------------
 
 class _PostCard extends StatelessWidget {
-  const _PostCard({required this.post, required this.onDelete});
+  const _PostCard({required this.post, required this.onDelete, required this.onEdit});
 
   final UserPost post;
   final VoidCallback onDelete;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
-    final anime = animeById(post.animeId);
+    final anime = animeById(post.animeId) ?? (post.animeId != null && post.animeImageUrl != null
+        ? Anime(
+            id: post.animeId!,
+            title: post.animeTitle ?? 'Anime',
+            genres: const [],
+            imageUrl: post.animeImageUrl!,
+          )
+        : null);
 
     return Container(
       clipBehavior: Clip.antiAlias,
@@ -193,97 +496,445 @@ class _PostCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Author row
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 6, 10),
-            child: Row(
-              children: [
-                UserAvatar(profile: post.author, size: 36),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        post.authorName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Mi.body(weight: FontWeight.w700),
-                      ),
-                      Text(timeAgo(post.createdAt), style: Mi.caption()),
-                    ],
+            padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+            child: Row(children: [
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: post.uid))),
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: const BoxDecoration(shape: BoxShape.circle, gradient: Mi.brand),
+                    child: Container(padding: const EdgeInsets.all(2), decoration: BoxDecoration(color: Mi.surface, shape: BoxShape.circle), child: UserAvatar(profile: post.author, size: 40)),
                   ),
                 ),
-                if (post.isMine)
-                  PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_horiz_rounded,
-                        size: 20, color: Mi.sub),
-                    padding: EdgeInsets.zero,
-                    color: Mi.surface,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    onSelected: (value) {
-                      if (value == 'delete') onDelete();
-                    },
-                    itemBuilder: (_) => [
-                      PopupMenuItem(
-                        value: 'delete',
-                        child: Text(
-                          'Delete',
-                          style: Mi.body(color: Mi.danger),
-                        ),
-                      ),
-                    ],
-                  )
-                else
-                  const SizedBox(width: 8),
-              ],
-            ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: post.uid))), child: Text(post.authorName, maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.body(weight: FontWeight.w700)))),
+                Row(children: [Text(timeAgo(post.createdAt), style: Mi.caption()), const SizedBox(width: 4), Icon(Icons.public_rounded, size: 12, color: Mi.sub)]),
+              ])),
+              if (post.isMine)
+                PopupMenuButton<String>(
+                  tooltip: 'Post options',
+                  icon: Icon(Icons.more_horiz_rounded, size: 20, color: Mi.sub),
+                  padding: EdgeInsets.zero,
+                  color: Mi.surface,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  onSelected: (value) { if (value == 'delete') onDelete(); if (value == 'edit') onEdit(); },
+                  itemBuilder: (_) => [
+                    PopupMenuItem(value: 'edit', child: Text('Edit post', style: Mi.body())),
+                    PopupMenuItem(value: 'delete', child: Text('Delete post', style: Mi.body(color: Mi.danger))),
+                  ],
+                ),
+            ]),
           ),
-          // Uploaded photo, or the tagged anime poster
+          if (post.caption.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                if (post.caption.isNotEmpty) Text(post.caption, style: Mi.body(size: 14)),
+              ]),
+            ),
           if (post.imageBase64 != null)
             _PostImage(base64: post.imageBase64!)
           else if (anime != null)
-            AspectRatio(
-              aspectRatio: 16 / 9,
-              child: Image.asset(
-                anime.image,
-                fit: BoxFit.cover,
-                alignment: Alignment.topCenter,
-                errorBuilder: (_, __, ___) => Container(color: Mi.line),
+            _TaggedAnimeMedia(anime: anime)
+          else if (post.animeId != null)
+            _LegacyTaggedAnimeMedia(animeId: post.animeId!)
+          else if (post.caption.isEmpty)
+            Padding(
+              padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: Text(
+                'Post content unavailable',
+                style: Mi.body(color: Mi.sub),
               ),
             ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (anime != null)
-                  Text(
-                    '#${anime.title}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Mi.body(
-                      size: 12,
-                      color: Mi.accent,
-                      weight: FontWeight.w700,
-                    ),
-                  ),
-                if (post.caption.isNotEmpty) ...[
-                  if (anime != null) const SizedBox(height: 4),
-                  Text(post.caption, style: Mi.body(size: 14)),
-                ],
-              ],
-            ),
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+            child: _PostEngagementSummary(post: post),
+          ),
+          Divider(height: 1, indent: 14, endIndent: 14, color: Mi.line),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            child: _PostActions(post: post, onComment: () => _openComments(context)),
           ),
         ],
       ),
     );
   }
+
+  void _openComments(BuildContext context) {
+    final controller = TextEditingController();
+    final service = UserDataService.instance;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Mi.surface,
+      showDragHandle: true,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
+        child: SizedBox(
+          height: MediaQuery.of(sheetContext).size.height * .65,
+          child: Column(children: [
+            Padding(padding: const EdgeInsets.all(16), child: Text('Comments', style: Mi.title(size: 20))),
+            Expanded(
+              child: StreamBuilder<List<Map<String, dynamic>>>(
+                stream: service.commentsStream(post.id),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) return const MiDataError();
+                  if (!snapshot.hasData) return const MiLoading();
+                  final comments = snapshot.data!;
+                  if (comments.isEmpty) return Center(child: Text('Be the first to comment.', style: Mi.caption()));
+                  return ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: comments.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final comment = comments[index];
+                      final profile = UserProfile(
+                        displayName: (comment['name'] as String?) ?? 'Anime Fan',
+                        email: '',
+                        bio: '',
+                        avatar: comment['avatar'] as String?,
+                        photoUrl: comment['photoUrl'] as String?,
+                        photoBase64: comment['photoBase64'] as String?,
+                        recentSearches: const [],
+                      );
+                      final createdAt = comment['createdAt'];
+                      final postedTime = createdAt is DateTime ? timeAgo(createdAt) : 'Just now';
+                      return Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: Mi.card(radius: 14),
+                        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(onTap: () { final uid = comment['uid'] as String?; if (uid != null && uid.isNotEmpty) Navigator.of(context).push(MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: uid))); }, child: UserAvatar(profile: profile, size: 38))),
+                          const SizedBox(width: 10),
+                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: MouseRegion(
+                                    cursor: SystemMouseCursors.click,
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        final uid = comment['uid'] as String?;
+                                        if (uid != null && uid.isNotEmpty) {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) => PublicProfileScreen(uid: uid),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      child: Text(
+                                        profile.displayName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Mi.body(weight: FontWeight.w700),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                Text(postedTime, style: Mi.caption()),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text((comment['text'] as String?) ?? '', style: Mi.body()),
+                          ])),
+                        ]),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(children: [
+                Expanded(child: TextField(controller: controller, maxLength: 280, decoration: const InputDecoration(hintText: 'Write a comment', counterText: '', border: OutlineInputBorder()))),
+                IconButton(
+                  icon: const Icon(Icons.send_rounded, color: Mi.accent),
+                  onPressed: () async {
+                    final text = controller.text;
+                    try {
+                      await service.addComment(post, text);
+                      controller.clear();
+                    } catch (_) {
+                      if (sheetContext.mounted) miSnack(sheetContext, 'Could not post comment.');
+                    }
+                  },
+                ),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    ).whenComplete(controller.dispose);
+  }
+}
+
+class _PostEngagementSummary extends StatelessWidget {
+  const _PostEngagementSummary({required this.post});
+  final UserPost post;
+
+  @override
+  Widget build(BuildContext context) {
+    final service = UserDataService.instance;
+    return Row(children: [
+      StreamBuilder<int>(
+        stream: service.postLikeCountStream(post.id),
+        builder: (context, snapshot) => Row(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 20, height: 20, decoration: const BoxDecoration(shape: BoxShape.circle, gradient: Mi.brand), child: const Icon(Icons.favorite_rounded, size: 12, color: Colors.white)),
+          const SizedBox(width: 6),
+          Text('${snapshot.data ?? 0}', style: Mi.caption()),
+        ]),
+      ),
+      const Spacer(),
+      StreamBuilder<List<Map<String, dynamic>>>(
+        stream: service.commentsStream(post.id),
+        builder: (context, snapshot) => Text('${snapshot.data?.length ?? 0} comments', style: Mi.caption()),
+      ),
+    ]);
+  }
+}
+
+class _PostActions extends StatelessWidget {
+  const _PostActions({required this.post, required this.onComment});
+  final UserPost post;
+  final VoidCallback onComment;
+
+  @override
+  Widget build(BuildContext context) {
+    final service = UserDataService.instance;
+    return Row(children: [
+      Expanded(
+        child: StreamBuilder<bool>(
+          stream: service.postLikedStream(post.id),
+          builder: (context, likedSnapshot) {
+            final liked = likedSnapshot.data ?? false;
+            return TextButton.icon(
+                onPressed: likedSnapshot.hasData ? () async {
+                  try {
+                    await service.setPostLiked(post.id, !liked);
+                  } catch (_) {
+                    if (context.mounted) miSnack(context, 'Could not update like.');
+                  }
+                } : null,
+                icon: Icon(liked ? Icons.favorite_rounded : Icons.favorite_border_rounded, color: liked ? Mi.accent : Mi.sub, size: 18),
+                label: const Text('Like'),
+              );
+          },
+        ),
+      ),
+      Expanded(
+        child: TextButton.icon(
+          onPressed: onComment,
+          icon: const Icon(Icons.mode_comment_outlined, size: 17),
+          label: const Text('Comment'),
+        ),
+      ),
+      Expanded(
+        child: TextButton.icon(
+          onPressed: () async {
+            final animeUrl = post.animeId == null ? '' : 'https://anilist.co/anime/${post.animeId}';
+            final content = [post.caption, animeUrl].where((value) => value.isNotEmpty).join('\n');
+            await Clipboard.setData(ClipboardData(text: content.isEmpty ? 'Anime community post' : content));
+            if (context.mounted) miSnack(context, 'Post text copied for sharing.');
+          },
+          icon: const Icon(Icons.share_outlined, size: 17),
+          label: const Text('Share'),
+        ),
+      ),
+    ]);
+  }
+}
+
+class PostDetailScreen extends StatelessWidget {
+  const PostDetailScreen({super.key, required this.post});
+  final UserPost post;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: Mi.bg,
+        appBar: AppBar(title: const Text('Community post'), backgroundColor: Mi.bg),
+        body: MiBackdrop(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+            children: [
+              _PostCard(
+                post: post,
+                onEdit: () => showEditPostSheet(context, post),
+                onDelete: () async {
+                  final deleted = await confirmDeletePost(context, post);
+                  if (deleted && context.mounted) Navigator.of(context).pop();
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+Future<void> showEditPostSheet(BuildContext context, UserPost post) {
+  if (!post.isMine) {
+    miSnack(context, 'Only the post owner can edit this post.');
+    return Future<void>.value();
+  }
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Mi.surface,
+    showDragHandle: true,
+    builder: (_) => _EditPostSheet(post: post),
+  );
+}
+
+Future<bool> confirmDeletePost(BuildContext context, UserPost post) async {
+  if (!post.isMine) {
+    miSnack(context, 'Only the post owner can delete this post.');
+    return false;
+  }
+  final confirm = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Delete post?'),
+      content: const Text('This post will be removed from the community.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Delete')),
+      ],
+    ),
+  );
+  if (confirm != true) return false;
+  try {
+    await UserDataService.instance.deletePost(post);
+    if (context.mounted) miSnack(context, 'Post deleted.');
+    return true;
+  } catch (_) {
+    if (context.mounted) miSnack(context, 'Could not delete post.');
+    return false;
+  }
+}
+
+class _EditPostSheet extends StatefulWidget {
+  const _EditPostSheet({required this.post});
+  final UserPost post;
+  @override
+  State<_EditPostSheet> createState() => _EditPostSheetState();
+}
+
+class _EditPostSheetState extends State<_EditPostSheet> {
+  late final _caption = TextEditingController(text: widget.post.caption);
+  late String? _animeId = widget.post.animeId;
+  bool _saving = false;
+
+  @override
+  void dispose() { _caption.dispose(); super.dispose(); }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await UserDataService.instance.updatePost(widget.post, caption: _caption.text, animeId: _animeId);
+      if (mounted) Navigator.of(context).pop();
+    } catch (_) {
+      if (mounted) { setState(() => _saving = false); miSnack(context, 'Could not edit post.'); }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('Edit post', style: Mi.title(size: 20)),
+          const SizedBox(height: 14),
+          TextField(controller: _caption, maxLength: 280, maxLines: 5, minLines: 3, decoration: const InputDecoration(labelText: 'Caption', border: OutlineInputBorder())),
+          Row(children: [
+            Expanded(child: Text(_animeId == null ? 'No anime tagged' : 'Tagged: ${animeById(_animeId)?.title ?? _animeId}', style: Mi.caption())),
+            TextButton.icon(onPressed: () => showDialog<void>(context: context, builder: (dialogContext) => _AnimeQuickSearchDialog(onSelected: (anime) { setState(() => _animeId = anime.id); Navigator.of(dialogContext).pop(); })), icon: const Icon(Icons.search_rounded, size: 16), label: const Text('Change tag')),
+            if (_animeId != null) IconButton(tooltip: 'Remove anime tag', onPressed: () => setState(() => _animeId = null), icon: const Icon(Icons.close_rounded)),
+          ]),
+          const SizedBox(height: 10),
+          FilledButton(onPressed: _saving ? null : _save, child: Text(_saving ? 'Saving…' : 'Save changes')),
+        ]),
+      );
 }
 
 /// Decodes the base64 photo once (not on every rebuild of the feed).
+class _TaggedAnimeMedia extends StatelessWidget {
+  const _TaggedAnimeMedia({required this.anime});
+
+  final Anime anime;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(color: Mi.tint, borderRadius: BorderRadius.circular(14)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.auto_awesome_rounded, size: 14, color: Mi.violet),
+                const SizedBox(width: 5),
+                Flexible(child: Text(anime.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.body(size: 12, color: Mi.violet, weight: FontWeight.w700))),
+              ]),
+            ),
+          ),
+          SizedBox(
+            width: double.infinity,
+            height: 300,
+            child: Image.network(
+              anime.imageUrl,
+              fit: BoxFit.cover,
+              alignment: Alignment.topCenter,
+              errorBuilder: (_, _, _) => const _MissingPostMedia(),
+            ),
+          ),
+        ],
+      );
+}
+
+class _LegacyTaggedAnimeMedia extends StatelessWidget {
+  const _LegacyTaggedAnimeMedia({required this.animeId});
+  final String animeId;
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Anime?>(
+        future: AnimeCatalogService.instance.animeById(animeId),
+        builder: (context, snapshot) {
+          if (snapshot.hasError || (snapshot.hasData && snapshot.data == null)) {
+            return const _MissingPostMedia();
+          }
+          if (!snapshot.hasData) {
+            return const SizedBox(height: 220, child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
+          }
+          return _TaggedAnimeMedia(anime: snapshot.data!);
+        },
+      );
+}
+
+class _MissingPostMedia extends StatelessWidget {
+  const _MissingPostMedia();
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: double.infinity,
+        height: 180,
+        child: ColoredBox(
+          color: Mi.line,
+          child: Center(
+            child: Icon(
+              Icons.image_not_supported_outlined,
+              size: 34,
+              color: Mi.sub,
+            ),
+          ),
+        ),
+      );
+}
+
 class _PostImage extends StatefulWidget {
   const _PostImage({required this.base64});
 
@@ -319,15 +970,23 @@ class _PostImageState extends State<_PostImage> {
         child: Container(
           color: Mi.line,
           alignment: Alignment.center,
-          child: const Icon(Icons.broken_image_outlined, color: Mi.sub),
+          child: Icon(Icons.broken_image_outlined, color: Mi.sub),
         ),
       );
     }
-    return Image.memory(
-      bytes,
+    // Scale to the feed width and keep the source aspect ratio so the full
+    // uploaded photo stays visible, including portrait and panoramic images.
+    return SizedBox(
       width: double.infinity,
-      fit: BoxFit.cover,
-      gaplessPlayback: true,
+      child: ColoredBox(
+        color: Mi.bg,
+        child: Image.memory(
+          bytes,
+          width: double.infinity,
+          fit: BoxFit.fitWidth,
+          gaplessPlayback: true,
+        ),
+      ),
     );
   }
 }
@@ -345,10 +1004,13 @@ class _NewPostSheet extends StatefulWidget {
 
 class _NewPostSheetState extends State<_NewPostSheet> {
   final TextEditingController _caption = TextEditingController();
+  final TextEditingController _animeSearch = TextEditingController();
   final ImagePicker _picker = ImagePicker();
   String? _animeId;
   XFile? _image;
   bool _saving = false;
+  late Future<List<Anime>> _animeOptions = AnimeCatalogService.instance.topAnime();
+  Timer? _animeSearchDebounce;
 
   bool get _canPost =>
       !_saving &&
@@ -414,7 +1076,21 @@ class _NewPostSheetState extends State<_NewPostSheet> {
   @override
   void dispose() {
     _caption.dispose();
+    _animeSearch.dispose();
+    _animeSearchDebounce?.cancel();
     super.dispose();
+  }
+
+  void _searchAnime(String value) {
+    _animeSearchDebounce?.cancel();
+    _animeSearchDebounce = Timer(const Duration(milliseconds: 450), () {
+      if (!mounted) return;
+      setState(() {
+        _animeOptions = value.trim().isEmpty
+            ? AnimeCatalogService.instance.topAnime()
+            : AnimeCatalogService.instance.searchAnime(value, refresh: true);
+      });
+    });
   }
 
   Future<void> _submit() async {
@@ -449,7 +1125,7 @@ class _NewPostSheetState extends State<_NewPostSheet> {
         onPressed: _saving ? null : _chooseImageSource,
         style: OutlinedButton.styleFrom(
           foregroundColor: Mi.text,
-          side: const BorderSide(color: Mi.line),
+          side: BorderSide(color: Mi.line),
           backgroundColor: Mi.bg,
           padding: const EdgeInsets.symmetric(vertical: 14),
           shape: RoundedRectangleBorder(
@@ -516,14 +1192,32 @@ class _NewPostSheetState extends State<_NewPostSheet> {
             const SizedBox(height: 16),
             Text('Tag an anime (optional)', style: Mi.caption()),
             const SizedBox(height: 8),
+            TextField(
+              controller: _animeSearch,
+              onChanged: _searchAnime,
+              textInputAction: TextInputAction.search,
+              decoration: const InputDecoration(
+                hintText: 'Search anime by title',
+                prefixIcon: Icon(Icons.search_rounded),
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 8),
             SizedBox(
-              height: 96,
-              child: ListView.separated(
+              height: 118,
+              child: FutureBuilder<List<Anime>>(
+                future: _animeOptions,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) return Center(child: TextButton.icon(onPressed: () => setState(() => _animeOptions = AnimeCatalogService.instance.topAnime(refresh: true)), icon: const Icon(Icons.refresh), label: const Text('Retry anime list')));
+                  if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+                  final animeList = snapshot.data!;
+                  return ListView.separated(
                 scrollDirection: Axis.horizontal,
-                itemCount: animeCatalog.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemCount: animeList.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 10),
                 itemBuilder: (context, index) {
-                  final anime = animeCatalog[index];
+                  final anime = animeList[index];
                   final selected = anime.id == _animeId;
                   return GestureDetector(
                     onTap: () => setState(
@@ -531,7 +1225,7 @@ class _NewPostSheetState extends State<_NewPostSheet> {
                     ),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
-                      width: 64,
+                      width: 82,
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
@@ -539,17 +1233,26 @@ class _NewPostSheetState extends State<_NewPostSheet> {
                           width: 2.5,
                         ),
                       ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(9.5),
-                        child: Image.asset(
-                          anime.image,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) =>
-                              Container(color: Mi.line),
-                        ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(3),
+                        child: Column(children: [
+                          Expanded(child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.network(
+                              anime.imageUrl,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) => Container(color: Mi.line),
+                            ),
+                          )),
+                          const SizedBox(height: 3),
+                          Text(anime.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: Mi.caption().copyWith(fontSize: 9)),
+                        ]),
                       ),
                     ),
                   );
+                },
+              );
                 },
               ),
             ),

@@ -1,5 +1,7 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../constants/account_menu.dart';
 import '../constants/minimal_ui.dart';
 import '../data/anime_catalog.dart';
 import '../services/user_data_service.dart';
@@ -18,6 +20,7 @@ class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
 
   late final Stream<UserProfile> _profile = _service.profileStream();
+  late final Stream<UserProfile> _headerProfile = _service.profileStream();
   late final Stream<Set<String>> _favorites = _service.favoriteIdsStream();
 
   String _query = '';
@@ -65,9 +68,10 @@ class _SearchScreenState extends State<SearchScreen> {
 
     return Scaffold(
       backgroundColor: Mi.bg,
-      body: SafeArea(
-        bottom: false,
-        child: StreamBuilder<Set<String>>(
+      body: MiBackdrop(
+        child: SafeArea(
+          bottom: false,
+          child: StreamBuilder<Set<String>>(
           stream: _favorites,
           builder: (context, favSnapshot) {
             final favorites = favSnapshot.data ?? const <String>{};
@@ -79,13 +83,15 @@ class _SearchScreenState extends State<SearchScreen> {
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
-                      Text('Search', style: Mi.title()),
-                      const SizedBox(height: 16),
+                      _buildHeader(),
+                      const SizedBox(height: 18),
                       _buildSearchField(),
                       const SizedBox(height: 14),
                       _buildGenreChips(),
                       if (_query.isEmpty) _buildRecent(),
-                      const SizedBox(height: 18),
+                      const SizedBox(height: 22),
+                      _buildResultCount(results.length),
+                      const SizedBox(height: 14),
                       if (favSnapshot.hasError) ...[
                         const MiDataError(),
                         const SizedBox(height: 18),
@@ -130,12 +136,59 @@ class _SearchScreenState extends State<SearchScreen> {
               ],
             );
           },
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildSearchField() {
+  Widget _buildHeader() {
+    final user = FirebaseAuth.instance.currentUser;
+    return StreamBuilder<UserProfile>(
+      stream: _headerProfile,
+      initialData: user == null ? null : UserProfile.fromData(null, user),
+      builder: (context, snapshot) {
+        final profile = snapshot.data;
+        return Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Search', style: Mi.title()),
+                  const SizedBox(height: 2),
+                  Text('Find your next favorite anime', style: Mi.caption()),
+                ],
+              ),
+            ),
+            if (profile != null) AccountMenuButton(profile: profile, size: 40),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildResultCount(int count) {
+    final browsing = _query.trim().isEmpty && _genre == null;
+    final label = browsing
+        ? 'All anime'
+        : _genre != null && _query.trim().isEmpty
+            ? _genre!
+            : 'Results';
+    return Row(
+      children: [
+        Expanded(child: Text(label, style: Mi.section())),
+        Text(
+          '$count ${count == 1 ? 'title' : 'titles'}',
+          style: Mi.caption(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSearchField() => _searchTextField();
+
+  Widget _searchTextField() {
     return TextField(
       controller: _controller,
       onChanged: (value) => setState(() => _query = value),
@@ -146,11 +199,11 @@ class _SearchScreenState extends State<SearchScreen> {
       decoration: InputDecoration(
         hintText: 'Search anime or genre',
         hintStyle: Mi.body(size: 15, color: Mi.sub),
-        prefixIcon: const Icon(Icons.search_rounded, color: Mi.sub),
+        prefixIcon: Icon(Icons.search_rounded, color: Mi.sub),
         suffixIcon: _query.isEmpty
             ? null
             : IconButton(
-                icon: const Icon(Icons.close_rounded, color: Mi.sub, size: 20),
+                icon: Icon(Icons.close_rounded, color: Mi.sub, size: 20),
                 onPressed: () => _setQuery(''),
               ),
         filled: true,
@@ -158,7 +211,7 @@ class _SearchScreenState extends State<SearchScreen> {
         contentPadding: const EdgeInsets.symmetric(vertical: 14),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: Mi.line),
+          borderSide: BorderSide(color: Mi.line),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
@@ -175,7 +228,7 @@ class _SearchScreenState extends State<SearchScreen> {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: genres.length + 1,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
           final label = index == 0 ? 'All' : genres[index - 1];
           final selected = index == 0 ? _genre == null : _genre == label;
@@ -190,9 +243,9 @@ class _SearchScreenState extends State<SearchScreen> {
               color: selected ? Colors.white : Mi.text,
               weight: FontWeight.w600,
             ),
-            backgroundColor: Mi.surface,
+            backgroundColor: Mi.tint,
             selectedColor: Mi.accent,
-            side: BorderSide(color: selected ? Mi.accent : Mi.line),
+            side: BorderSide(color: selected ? Mi.accent : Colors.transparent),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
@@ -222,7 +275,9 @@ class _SearchScreenState extends State<SearchScreen> {
                       try {
                         await _service.clearRecentSearches();
                       } catch (_) {
-                        if (mounted) miSnack(context, "Couldn't clear history.");
+                        if (context.mounted) {
+                          miSnack(context, "Couldn't clear history.");
+                        }
                       }
                     },
                     child: Text(
@@ -243,11 +298,13 @@ class _SearchScreenState extends State<SearchScreen> {
                 children: [
                   for (final term in recent)
                     ActionChip(
+                      avatar: Icon(Icons.history_rounded,
+                          size: 16, color: Mi.sub),
                       label: Text(term),
                       onPressed: () => _setQuery(term),
                       labelStyle: Mi.body(size: 13),
                       backgroundColor: Mi.surface,
-                      side: const BorderSide(color: Mi.line),
+                      side: BorderSide(color: Mi.line),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                       ),

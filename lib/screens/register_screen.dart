@@ -82,7 +82,10 @@ class _RegisterScreenState extends State<RegisterScreen>
       body: Stack(
         children: [
           const Positioned.fill(
-            child: AnimeAuthBackground(images: _backgrounds),
+            child: AnimeAuthBackground(
+              images: _backgrounds,
+              petals: false,
+            ),
           ),
           SafeArea(
             child: Center(
@@ -110,7 +113,6 @@ class _RegisterScreenState extends State<RegisterScreen>
                           parent: _entryController,
                           index: 1,
                           child: const AnimeHeading(
-                            jp: 'ようこそ！  新規登録',
                             title: 'CREATE YOUR ACCOUNT',
                             subtitle:
                                 'Join the community and start your adventure',
