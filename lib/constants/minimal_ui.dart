@@ -9,6 +9,7 @@ import '../data/anime_catalog.dart';
 import '../services/user_data_service.dart';
 import '../services/anime_catalog_service.dart';
 import '../services/theme_controller.dart';
+import 'app_motion.dart';
 
 /// Clean, light, minimal look shared by Home / Search / Profile:
 /// off-white background, white cards with hairline borders, one accent color.
@@ -412,6 +413,57 @@ class UserAvatar extends StatelessWidget {
   }
 }
 
+class FriendAvatar extends StatefulWidget {
+  const FriendAvatar({
+    super.key,
+    required this.uid,
+    required this.name,
+    this.size = 44,
+  });
+
+  final String uid;
+  final String name;
+  final double size;
+
+  @override
+  State<FriendAvatar> createState() => _FriendAvatarState();
+}
+
+class _FriendAvatarState extends State<FriendAvatar> {
+  late Stream<UserProfile?> _profileStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _profileStream = UserDataService.instance.publicProfileStream(widget.uid);
+  }
+
+  @override
+  void didUpdateWidget(covariant FriendAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.uid != widget.uid) {
+      _profileStream = UserDataService.instance.publicProfileStream(widget.uid);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => StreamBuilder<UserProfile?>(
+        stream: _profileStream,
+        builder: (context, snapshot) {
+          final profile = snapshot.data ??
+              UserProfile(
+                displayName: widget.name,
+                email: '',
+                bio: '',
+                avatar: null,
+                photoUrl: null,
+                recentSearches: const [],
+              );
+          return UserAvatar(profile: profile, size: widget.size);
+        },
+      );
+}
+
 // ---------------------------------------------------------------------------
 // Anime poster tile + detail sheet
 // ---------------------------------------------------------------------------
@@ -438,12 +490,14 @@ class AnimeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => showAnimeSheet(context, anime),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => showAnimeSheet(context, anime),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           AspectRatio(
             aspectRatio: 2 / 3,
             child: Stack(
@@ -472,21 +526,24 @@ class AnimeTile extends StatelessWidget {
                 Positioned(
                   top: 8,
                   right: 8,
-                  child: GestureDetector(
-                    onTap: () => toggleFavorite(context, anime, isFavorite),
-                    child: Container(
-                      width: 32,
-                      height: 32,
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        isFavorite
-                            ? Icons.favorite_rounded
-                            : Icons.favorite_border_rounded,
-                        size: 18,
-                        color: isFavorite ? Mi.accent : Mi.sub,
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: () => toggleFavorite(context, anime, isFavorite),
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          isFavorite
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          size: 18,
+                          color: isFavorite ? Mi.accent : Mi.sub,
+                        ),
                       ),
                     ),
                   ),
@@ -516,7 +573,8 @@ class AnimeTile extends StatelessWidget {
             style: Mi.caption().copyWith(fontSize: 11),
           ),
           Text(anime.seasonLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.caption().copyWith(fontSize: 11)),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -524,7 +582,7 @@ class AnimeTile extends StatelessWidget {
 
 Future<void> showAnimeSheet(BuildContext context, Anime anime) {
   return Navigator.of(context).push<void>(
-    MaterialPageRoute(builder: (_) => AnimeDetailsScreen(anime: anime)),
+    AppMotion.popPage(AnimeDetailsScreen(anime: anime)),
   );
 }
 

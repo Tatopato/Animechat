@@ -6,12 +6,17 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../constants/minimal_ui.dart';
+import '../constants/app_motion.dart';
 import '../services/user_data_service.dart';
 import '../services/theme_controller.dart';
 import 'public_profile_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
+
+  static final ValueNotifier<Map<String, dynamic>?> pendingConversation =
+      ValueNotifier<Map<String, dynamic>?>(null);
+
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
@@ -25,6 +30,29 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     ThemeController.isDarkMode.addListener(_onThemeChanged);
+    ChatScreen.pendingConversation.addListener(_openPendingConversation);
+    _openPendingConversation();
+  }
+
+  void _openPendingConversation() {
+    final details = ChatScreen.pendingConversation.value;
+    if (details == null || !mounted) return;
+    ChatScreen.pendingConversation.value = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        AppMotion.route(
+          builder: (_) => _ConversationScreen(
+            chatId: details['chatId'] as String,
+            title: details['chatName'] as String? ?? 'Chat',
+            isGroup: details['isGroup'] == true,
+            members: List<String>.from(details['members'] as List? ?? const []),
+            groupPhotoBase64: details['photoBase64'] as String?,
+          ),
+        ),
+      );
+    });
   }
 
   void _onThemeChanged() {
@@ -34,6 +62,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     ThemeController.isDarkMode.removeListener(_onThemeChanged);
+    ChatScreen.pendingConversation.removeListener(_openPendingConversation);
     super.dispose();
   }
 
@@ -96,14 +125,31 @@ class _ChatScreenState extends State<ChatScreen> {
                         Card(
                           color: Mi.surface,
                           child: ListTile(
-                            leading: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: (friend['uid'] as String?) ?? ''))), child: CircleAvatar(backgroundColor: Mi.tint, child: const Icon(Icons.person_rounded, color: Mi.violet)))),
+                            leading: MouseRegion(
+                              cursor: SystemMouseCursors.click,
+                              child: GestureDetector(
+                                onTap: () => Navigator.push(
+                                  context,
+                                  AppMotion.route(
+                                    builder: (_) => PublicProfileScreen(
+                                      uid: (friend['uid'] as String?) ?? '',
+                                    ),
+                                  ),
+                                ),
+                                child: FriendAvatar(
+                                  uid: (friend['uid'] as String?) ?? '',
+                                  name: (friend['name'] as String?) ?? 'Friend',
+                                  size: 42,
+                                ),
+                              ),
+                            ),
                             title: Text((friend['name'] as String?) ?? 'Friend', style: Mi.body()),
                             subtitle: Text((friend['uid'] as String?) ?? '', style: Mi.caption()),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () {
                               final chatId = friend['chatId'] as String?;
                               if (chatId == null) return;
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => _ConversationScreen(chatId: chatId, title: (friend['name'] as String?) ?? 'Chat')));
+                              Navigator.push(context, AppMotion.route(builder: (_) => _ConversationScreen(chatId: chatId, title: (friend['name'] as String?) ?? 'Chat')));
                             },
                           ),
                         ),
@@ -130,15 +176,16 @@ class _ChatScreenState extends State<ChatScreen> {
                         Card(
                           color: Mi.surface,
                           child: ListTile(
-                            leading: CircleAvatar(backgroundColor: Mi.tint, child: const Icon(Icons.groups_rounded, color: Mi.violet)),
+                            leading: _groupAvatar(group['photoBase64'] as String?),
                             title: Text((group['name'] as String?) ?? 'Group chat', style: Mi.body(weight: FontWeight.w700)),
                             subtitle: Text('${(group['members'] as List? ?? const []).length} members', style: Mi.caption()),
                             trailing: const Icon(Icons.chevron_right),
-                            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _ConversationScreen(
+                            onTap: () => Navigator.push(context, AppMotion.route(builder: (_) => _ConversationScreen(
                               chatId: group['chatId'] as String,
                               title: (group['name'] as String?) ?? 'Group chat',
                               isGroup: true,
                               members: List<String>.from(group['members'] as List? ?? const []),
+                              groupPhotoBase64: group['photoBase64'] as String?,
                             ))),
                           ),
                         ),
@@ -152,10 +199,158 @@ class _ChatScreenState extends State<ChatScreen> {
       );
 }
 
+Widget _groupAvatar(String? photoBase64) {
+  Uint8List? photo;
+  if (photoBase64 != null && photoBase64.isNotEmpty) {
+    try {
+      photo = base64Decode(photoBase64);
+    } catch (_) {
+      photo = null;
+    }
+  }
+  return CircleAvatar(
+    backgroundColor: Mi.tint,
+    backgroundImage: photo == null ? null : MemoryImage(photo),
+    child: photo == null ? const Icon(Icons.groups_rounded, color: Mi.violet) : null,
+  );
+}
+
 class _GroupDraft {
   const _GroupDraft({this.name, required this.friendUids});
   final String? name;
   final List<String> friendUids;
+}
+
+class _GroupProfileDraft {
+  const _GroupProfileDraft({required this.name, required this.photoBase64});
+  final String name;
+  final String? photoBase64;
+}
+
+class _GroupMembersSheet extends StatelessWidget {
+  const _GroupMembersSheet({required this.groupName, required this.members});
+
+  final String groupName;
+  final List<Map<String, dynamic>> members;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * .68,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Members', style: Mi.title(size: 20)),
+                  const SizedBox(height: 3),
+                  Text('$groupName · ${members.length} members', style: Mi.caption()),
+                ]),
+              ),
+              Divider(height: 1, color: Mi.line),
+              Expanded(
+                child: ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(14, 8, 14, 18),
+                  itemCount: members.length,
+                  separatorBuilder: (_, _) => Divider(height: 1, indent: 60, color: Mi.line),
+                  itemBuilder: (context, index) {
+                    final member = members[index];
+                    final uid = member['uid'] as String? ?? '';
+                    final name = member['name'] as String? ?? 'Anime Fan';
+                    final isOwner = member['isOwner'] == true;
+                    final isMe = uid == UserDataService.instance.currentUid;
+                    final badges = <String>[
+                      if (isMe) 'You',
+                      if (isOwner) 'Group admin',
+                    ];
+                    return ListTile(
+                      leading: FriendAvatar(uid: uid, name: name, size: 42),
+                      title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.body(weight: FontWeight.w700)),
+                      subtitle: Text(badges.isEmpty ? uid : badges.join(' · '), maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.caption()),
+                      trailing: Icon(Icons.chevron_right_rounded, color: Mi.sub),
+                      onTap: uid.isEmpty ? null : () => Navigator.of(context).push(AppMotion.route(builder: (_) => PublicProfileScreen(uid: uid))),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+class _GroupProfileDialog extends StatefulWidget {
+  const _GroupProfileDialog({required this.name, this.photoBase64});
+
+  final String name;
+  final String? photoBase64;
+
+  @override
+  State<_GroupProfileDialog> createState() => _GroupProfileDialogState();
+}
+
+class _GroupProfileDialogState extends State<_GroupProfileDialog> {
+  late final _name = TextEditingController(text: widget.name);
+  late String? _photoBase64 = widget.photoBase64;
+  final _picker = ImagePicker();
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickPhoto() async {
+    try {
+      final image = await _picker.pickImage(source: ImageSource.gallery, maxWidth: 256, maxHeight: 256, imageQuality: 68);
+      if (image == null) return;
+      final encoded = await UserDataService.instance.encodeAvatar(image);
+      if (mounted) setState(() => _photoBase64 = encoded);
+    } on FormatException {
+      if (mounted) miSnack(context, 'That group photo is too large. Choose another image.');
+    } catch (_) {
+      if (mounted) miSnack(context, 'Could not open the photo picker.');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ImageProvider? image;
+    if (_photoBase64 != null) {
+      try {
+        image = MemoryImage(base64Decode(_photoBase64!));
+      } catch (_) {
+        image = null;
+      }
+    }
+    return AlertDialog(
+      backgroundColor: Mi.surface,
+      title: Text('Edit group profile', style: Mi.title(size: 19)),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(radius: 42, backgroundColor: Mi.tint, backgroundImage: image, child: image == null ? const Icon(Icons.groups_rounded, color: Mi.violet, size: 34) : null),
+            const SizedBox(height: 8),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              TextButton.icon(onPressed: _pickPhoto, icon: const Icon(Icons.photo_outlined), label: const Text('Change photo')),
+              if (_photoBase64 != null) IconButton(tooltip: 'Remove photo', onPressed: () => setState(() => _photoBase64 = null), icon: const Icon(Icons.delete_outline_rounded, color: Mi.danger)),
+            ]),
+            TextField(controller: _name, maxLength: 60, autofocus: true, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Group name', border: OutlineInputBorder())),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: _name.text.trim().isEmpty ? null : () => Navigator.pop(context, _GroupProfileDraft(name: _name.text.trim(), photoBase64: _photoBase64)),
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
 }
 
 class _GroupMemberDialog extends StatefulWidget {
@@ -252,11 +447,12 @@ const _chatThemes = [
 ];
 
 class _ConversationScreen extends StatefulWidget {
-  const _ConversationScreen({required this.chatId, required this.title, this.isGroup = false, this.members = const []});
+  const _ConversationScreen({required this.chatId, required this.title, this.isGroup = false, this.members = const [], this.groupPhotoBase64});
   final String chatId;
   final String title;
   final bool isGroup;
   final List<String> members;
+  final String? groupPhotoBase64;
   @override
   State<_ConversationScreen> createState() => _ConversationScreenState();
 }
@@ -270,7 +466,19 @@ class _ConversationScreenState extends State<_ConversationScreen> {
   bool _customTheme = false;
   bool _sending = false;
   late List<String> _members = List<String>.from(widget.members);
+  late String _chatName = widget.title;
+  late String? _groupPhotoBase64 = widget.groupPhotoBase64;
+  final Map<String, Future<UserProfile?>> _legacyProfiles = {};
   _ChatTheme get _theme => _chatThemes[_themeIndex];
+  ImageProvider? get _groupPhotoImage {
+    final encoded = _groupPhotoBase64;
+    if (encoded == null || encoded.isEmpty) return null;
+    try {
+      return MemoryImage(base64Decode(encoded));
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
   void initState() {
@@ -304,6 +512,47 @@ class _ConversationScreenState extends State<_ConversationScreen> {
       }
     } catch (_) {
       if (mounted) miSnack(context, 'Could not add friends to this group.');
+    }
+  }
+
+  Future<void> _editGroupProfile() async {
+    final draft = await showDialog<_GroupProfileDraft>(
+      context: context,
+      builder: (_) => _GroupProfileDialog(name: _chatName, photoBase64: _groupPhotoBase64),
+    );
+    if (draft == null || !mounted) return;
+    try {
+      await _service.updateGroupProfile(
+        chatId: widget.chatId,
+        name: draft.name,
+        photoBase64: draft.photoBase64,
+      );
+      if (!mounted) return;
+      setState(() {
+        _chatName = draft.name;
+        _groupPhotoBase64 = draft.photoBase64;
+      });
+      miSnack(context, 'Group profile updated.');
+    } on FormatException catch (error) {
+      if (mounted) miSnack(context, error.message == 'group-photo-too-large' ? 'Choose a smaller group photo.' : 'Enter a group name.');
+    } catch (_) {
+      if (mounted) miSnack(context, 'Could not update the group profile. Check Firebase Rules and try again.');
+    }
+  }
+
+  Future<void> _showGroupMembers() async {
+    try {
+      final members = await _service.groupMembersOnce(widget.chatId);
+      if (!mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Mi.surface,
+        showDragHandle: true,
+        isScrollControlled: true,
+        builder: (_) => _GroupMembersSheet(groupName: _chatName, members: members),
+      );
+    } catch (_) {
+      if (mounted) miSnack(context, 'Could not load group members.');
     }
   }
 
@@ -400,17 +649,20 @@ class _ConversationScreenState extends State<_ConversationScreen> {
   @override
   Widget build(BuildContext context) {
     final dark = _themeIndex == 2;
+    final groupPhoto = _groupPhotoImage;
     return Scaffold(
       backgroundColor: _theme.background,
       appBar: AppBar(
         backgroundColor: _theme.surface,
         foregroundColor: dark ? Colors.white : Mi.text,
         title: Row(children: [
-          Container(padding: const EdgeInsets.all(2), decoration: BoxDecoration(shape: BoxShape.circle, gradient: _theme.myBubble), child: const CircleAvatar(backgroundColor: Colors.white, child: Icon(Icons.person_rounded, color: Mi.violet))),
+          Container(padding: const EdgeInsets.all(2), decoration: BoxDecoration(shape: BoxShape.circle, gradient: _theme.myBubble), child: CircleAvatar(backgroundColor: Colors.white, backgroundImage: groupPhoto, child: groupPhoto == null ? Icon(widget.isGroup ? Icons.groups_rounded : Icons.person_rounded, color: Mi.violet) : null)),
           const SizedBox(width: 10),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.body(color: dark ? Colors.white : Mi.text, weight: FontWeight.w700)), Text(widget.isGroup ? 'Group · ${_members.length} members' : 'Private chat', style: Mi.caption())])),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(_chatName, maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.body(color: dark ? Colors.white : Mi.text, weight: FontWeight.w700)), Text(widget.isGroup ? 'Group · ${_members.length} members' : 'Private chat', style: Mi.caption())])),
         ]),
         actions: [
+          if (widget.isGroup) IconButton(tooltip: 'Edit group profile', onPressed: _editGroupProfile, icon: Icon(Icons.edit_rounded, color: _theme.accent)),
+          if (widget.isGroup) IconButton(tooltip: 'View group members', onPressed: _showGroupMembers, icon: Icon(Icons.groups_2_outlined, color: _theme.accent)),
           if (widget.isGroup) IconButton(tooltip: 'Add friends', onPressed: _addGroupMembers, icon: Icon(Icons.person_add_alt_1_rounded, color: _theme.accent)),
           IconButton(tooltip: 'Choose theme', onPressed: _chooseTheme, icon: Icon(Icons.palette_outlined, color: _theme.accent)),
         ],
@@ -424,7 +676,7 @@ class _ConversationScreenState extends State<_ConversationScreen> {
               if (snap.hasError) return Center(child: Text('Could not load messages.', style: Mi.body(color: dark ? Colors.white70 : Mi.sub)));
               if (!snap.hasData) return const Center(child: CircularProgressIndicator());
               final messages = snap.data!;
-              if (messages.isEmpty) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.waving_hand_rounded, size: 34, color: _theme.accent), const SizedBox(height: 8), Text('Say hello to ${widget.title}!', style: Mi.body(color: dark ? Colors.white70 : Mi.sub))]));
+              if (messages.isEmpty) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.waving_hand_rounded, size: 34, color: _theme.accent), const SizedBox(height: 8), Text('Say hello to $_chatName!', style: Mi.body(color: dark ? Colors.white70 : Mi.sub))]));
               return ListView.builder(
                 padding: const EdgeInsets.fromLTRB(14, 20, 14, 18),
                 itemCount: messages.length,
@@ -450,17 +702,30 @@ class _ConversationScreenState extends State<_ConversationScreen> {
 
   Widget _messageBubble(Map<String, dynamic> message, bool dark) {
     final mine = message['uid'] == _service.currentUid;
+    final senderUid = message['uid'] as String? ?? '';
+    final storedName = (message['senderName'] as String?)?.trim().isNotEmpty == true
+        ? (message['senderName'] as String).trim()
+        : (message['fromName'] as String?)?.trim().isNotEmpty == true
+            ? (message['fromName'] as String).trim()
+            : widget.isGroup ? 'Friend' : widget.title;
+    final senderProfile = UserProfile(
+      displayName: storedName,
+      email: '',
+      bio: '',
+      avatar: message['senderAvatar'] as String?,
+      photoUrl: message['senderPhotoUrl'] as String?,
+      photoBase64: message['senderPhotoBase64'] as String?,
+      recentSearches: const [],
+    );
     final text = (message['text'] as String?) ?? '';
     final data = message['attachmentBase64'] as String?;
     final name = (message['attachmentName'] as String?) ?? 'Attachment';
     final type = (message['attachmentType'] as String?) ?? '';
     final sentAt = message['createdAt'] as DateTime?;
     final time = sentAt == null ? '' : '${sentAt.hour.toString().padLeft(2, '0')}:${sentAt.minute.toString().padLeft(2, '0')}';
-    return Align(
-      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * .78),
-        margin: const EdgeInsets.only(bottom: 10),
+    final bubble = Container(
+        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * (mine ? .78 : .68)),
+        margin: EdgeInsets.only(bottom: mine ? 10 : 0),
         padding: const EdgeInsets.all(11),
         decoration: BoxDecoration(color: mine ? null : _theme.friendBubble, gradient: mine ? _theme.myBubble : null, borderRadius: BorderRadius.only(topLeft: const Radius.circular(18), topRight: const Radius.circular(18), bottomLeft: Radius.circular(mine ? 18 : 5), bottomRight: Radius.circular(mine ? 5 : 18)), boxShadow: const [BoxShadow(color: Color(0x12000000), blurRadius: 8, offset: Offset(0, 3))]),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -474,7 +739,40 @@ class _ConversationScreenState extends State<_ConversationScreen> {
           if (text.isNotEmpty) Text(text, style: Mi.body(color: mine || dark ? Colors.white : Mi.text)),
           if (time.isNotEmpty) Align(alignment: Alignment.bottomRight, child: Padding(padding: const EdgeInsets.only(top: 4), child: Text(time, style: Mi.caption().copyWith(color: mine || dark ? Colors.white70 : Mi.sub, fontSize: 10)))),
         ]),
-      ),
+      );
+    return Align(
+      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+      child: mine
+          ? bubble
+          : Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+                FutureBuilder<UserProfile?>(
+                  future: senderUid.isEmpty || message['senderName'] != null
+                      ? null
+                      : (_legacyProfiles[senderUid] ??= _service.publicProfileStream(senderUid).first),
+                  builder: (context, snapshot) {
+                    final profile = snapshot.data ?? senderProfile;
+                    final senderName = profile.displayName;
+                    return Row(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+                      MouseRegion(
+                        cursor: senderUid.isEmpty ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                        child: GestureDetector(
+                        onTap: senderUid.isEmpty ? null : () => Navigator.of(context).push(
+                          AppMotion.route(builder: (_) => PublicProfileScreen(uid: senderUid)),
+                        ),
+                        child: Padding(padding: const EdgeInsets.only(right: 8, bottom: 10), child: UserAvatar(profile: profile, size: 32)),
+                        ),
+                      ),
+                      Flexible(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Padding(padding: const EdgeInsets.only(left: 4, bottom: 4), child: Text(senderName, style: Mi.caption().copyWith(color: dark ? Colors.white70 : Mi.sub, fontWeight: FontWeight.w700))),
+                        bubble,
+                      ])),
+                    ]);
+                  },
+                ),
+              ]),
+            ),
     );
   }
 

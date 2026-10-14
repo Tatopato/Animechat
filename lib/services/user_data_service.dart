@@ -162,6 +162,8 @@ class UserDataService {
       _db.collection('posts');
   CollectionReference<Map<String, dynamic>> get _favorites =>
       _doc.collection('favorites');
+  CollectionReference<Map<String, dynamic>> get _savedPosts =>
+      _doc.collection('savedPosts');
 
   // ------------------------------------------------------------- community
 
@@ -175,8 +177,14 @@ class UserDataService {
     final existing = await _doc.collection('friends').doc(target).get();
     if (existing.exists) return 'already';
     final name = (found.data()?['displayName'] as String?)?.trim();
+    final sender = UserProfile.fromData((await _doc.get()).data(), _user);
     await _db.collection('users').doc(target).collection('friendRequests')
-        .doc(_user.uid).set({'uid': _user.uid, 'name': UserProfile.fromData(null, _user).displayName, 'createdAt': FieldValue.serverTimestamp()});
+        .doc(_user.uid).set({'uid': _user.uid, 'name': sender.displayName, 'createdAt': FieldValue.serverTimestamp()});
+    await _createNotification(target, {
+      'type': 'friend_request',
+      'fromUid': _user.uid,
+      'fromName': sender.displayName,
+    });
     return 'sent:${name?.isNotEmpty == true ? name : 'Anime Fan'}';
   }
 
@@ -197,17 +205,33 @@ class UserDataService {
     await _doc.collection('friends').doc(request.uid).set({'chatId': chatId}, SetOptions(merge: true));
     await otherRef.collection('friends').doc(_user.uid).set({'chatId': chatId}, SetOptions(merge: true));
     await _db.collection('chats').doc(chatId).set({'members': ids, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+    await _createNotification(request.uid, {
+      'type': 'friend_accepted',
+      'fromUid': _user.uid,
+      'fromName': me,
+    });
   }
 
   Future<void> rejectFriend(FriendRequest request) => _doc.collection('friendRequests').doc(request.uid).delete();
 
   Stream<List<Map<String, dynamic>>> friendsStream() => _doc.collection('friends').snapshots().map((s) => s.docs.map((d) => {...d.data(), 'uid': d.id}).toList());
 
-  Stream<List<Map<String, dynamic>>> myGroupChatsStream() => _doc
+  Stream<List<Map<String, dynamic>>> myGroupChatsStream() => _db
       .collection('chats')
-      .orderBy('updatedAt', descending: true)
+      .where('members', arrayContains: _user.uid)
       .snapshots()
-      .map((s) => s.docs.map((d) => {...d.data(), 'chatId': d.id}).toList());
+      .map((snapshot) {
+        final groups = snapshot.docs
+            .where((doc) => doc.data()['isGroup'] == true)
+            .map((doc) => {...doc.data(), 'chatId': doc.id})
+            .toList();
+        DateTime updatedAt(Map<String, dynamic> group) {
+          final value = group['updatedAt'];
+          return value is Timestamp ? value.toDate() : DateTime.fromMillisecondsSinceEpoch(0);
+        }
+        groups.sort((a, b) => updatedAt(b).compareTo(updatedAt(a)));
+        return groups;
+      });
 
   Future<List<Map<String, dynamic>>> friendsOnce() async {
     final snapshot = await _doc.collection('friends').get();
@@ -251,6 +275,7 @@ class UserDataService {
       'createdBy': _user.uid,
       'members': members,
       'memberNames': memberNames,
+      'photoBase64': null,
       'updatedAt': FieldValue.serverTimestamp(),
     });
     for (final uid in members) {
@@ -262,6 +287,48 @@ class UserDataService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
     }
+  }
+
+  Future<void> updateGroupProfile({
+    required String chatId,
+    required String name,
+    String? photoBase64,
+  }) async {
+    final title = name.trim();
+    if (title.isEmpty || title.length > 60) {
+      throw const FormatException('group-name-invalid');
+    }
+    if ((photoBase64?.length ?? 0) > 140000) {
+      throw const FormatException('group-photo-too-large');
+    }
+    await _db.collection('chats').doc(chatId).update({
+      'name': title,
+      'photoBase64': photoBase64,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> groupMembersOnce(String chatId) async {
+    final snapshot = await _db.collection('chats').doc(chatId).get();
+    final data = snapshot.data();
+    if (!snapshot.exists || data == null || data['isGroup'] != true) {
+      throw StateError('Group chat not found.');
+    }
+    final members = List<String>.from(data['members'] as List? ?? const []);
+    if (!members.contains(_user.uid)) {
+      throw StateError('You are not a member of this group.');
+    }
+    final names = Map<String, dynamic>.from(data['memberNames'] as Map? ?? const {});
+    final ownerUid = data['createdBy'] as String?;
+    return members
+        .map((uid) => {
+              'uid': uid,
+              'name': (names[uid] as String?)?.trim().isNotEmpty == true
+                  ? (names[uid] as String).trim()
+                  : 'Anime Fan',
+              'isOwner': uid == ownerUid,
+            })
+        .toList();
   }
 
   Future<List<String>> addGroupMembers(String chatId, List<String> friendUids) async {
@@ -318,8 +385,20 @@ class UserDataService {
     }
     final ref = _db.collection('chats').doc(chatId);
     final preview = message.isNotEmpty ? message : 'Sent ${attachmentName ?? 'an attachment'}';
-    await ref.collection('messages').add({
+    final chat = await ref.get();
+    final chatData = chat.data() ?? const <String, dynamic>{};
+    final members = List<String>.from(chatData['members'] as List? ?? const []);
+    final profile = UserProfile.fromData((await _doc.get()).data(), _user);
+    final senderName = (Map<String, dynamic>.from(
+              chatData['memberNames'] as Map? ?? const {},
+            )[_user.uid] as String?) ??
+        profile.displayName;
+    final messageRef = await ref.collection('messages').add({
       'uid': _user.uid,
+      'senderName': senderName,
+      'senderAvatar': profile.avatar,
+      'senderPhotoUrl': profile.photoUrl,
+      'senderPhotoBase64': profile.photoBase64,
       'text': message,
       'attachmentBase64': attachmentBase64,
       'attachmentName': attachmentName,
@@ -327,13 +406,25 @@ class UserDataService {
       'createdAt': FieldValue.serverTimestamp(),
     });
     await ref.set({'updatedAt': FieldValue.serverTimestamp(), 'lastMessage': preview}, SetOptions(merge: true));
+    await Future.wait(members.where((uid) => uid != _user.uid).map((uid) =>
+        _createNotification(uid, {
+          'type': 'message',
+          'chatId': chatId,
+          'messageId': messageRef.id,
+          'chatName': (chatData['name'] as String?) ?? senderName,
+          'isGroup': chatData['isGroup'] == true,
+          'members': members,
+          'fromUid': _user.uid,
+          'fromName': senderName,
+          'text': preview.length > 120 ? '${preview.substring(0, 120)}…' : preview,
+        })));
   }
 
   Future<void> addComment(UserPost post, String text) async {
     final comment = text.trim();
     if (comment.isEmpty) return;
     final profile = UserProfile.fromData((await _doc.get()).data(), _user);
-    await _posts.doc(post.id).collection('comments').add({
+    final commentRef = await _posts.doc(post.id).collection('comments').add({
       'uid': _user.uid,
       'name': profile.displayName,
       'avatar': profile.avatar,
@@ -343,7 +434,14 @@ class UserDataService {
       'createdAt': FieldValue.serverTimestamp(),
     });
     if (post.uid != _user.uid) {
-      await _db.collection('users').doc(post.uid).collection('notifications').add({'type': 'comment', 'postId': post.id, 'fromUid': _user.uid, 'fromName': profile.displayName, 'text': comment, 'createdAt': FieldValue.serverTimestamp(), 'read': false});
+      await _createNotification(post.uid, {
+        'type': 'comment',
+        'postId': post.id,
+        'commentId': commentRef.id,
+        'fromUid': _user.uid,
+        'fromName': profile.displayName,
+        'text': comment,
+      });
     }
   }
 
@@ -363,14 +461,77 @@ class UserDataService {
     final ref = _posts.doc(postId).collection('likes').doc(_user.uid);
     if (liked) {
       await ref.set({'uid': _user.uid, 'createdAt': FieldValue.serverTimestamp()});
+      final post = await _posts.doc(postId).get();
+      final ownerUid = post.data()?['uid'] as String?;
+      if (ownerUid != null && ownerUid != _user.uid) {
+        final profile = UserProfile.fromData((await _doc.get()).data(), _user);
+        await _createNotification(ownerUid, {
+          'type': 'like',
+          'postId': postId,
+          'fromUid': _user.uid,
+          'fromName': profile.displayName,
+        });
+      }
     } else {
       await ref.delete();
     }
   }
 
+  Stream<bool> postSavedStream(String postId) =>
+      _savedPosts.doc(postId).snapshots().map((snapshot) => snapshot.exists);
+
+  Future<void> setPostSaved(String postId, bool saved) {
+    final ref = _savedPosts.doc(postId);
+    if (saved) {
+      return ref.set({'postId': postId, 'savedAt': FieldValue.serverTimestamp()});
+    }
+    return ref.delete();
+  }
+
+  /// Saved post documents stay private under the signed-in user's profile.
+  Stream<List<UserPost>> savedPostsStream() async* {
+    final query = _savedPosts.orderBy('savedAt', descending: true);
+    Future<List<UserPost>> loadSavedPosts(
+      QuerySnapshot<Map<String, dynamic>> snapshot,
+    ) async {
+        final posts = await Future.wait(snapshot.docs.map((saved) async {
+          final postId = saved.id;
+          final post = await _posts.doc(postId).get();
+          if (!post.exists) return null;
+          return UserPost.fromDoc(post);
+        }));
+        return posts.whereType<UserPost>().toList();
+    }
+
+    yield await loadSavedPosts(await query.get());
+    await for (final snapshot in query.snapshots()) {
+      yield await loadSavedPosts(snapshot);
+    }
+  }
+
+  Future<void> _createNotification(
+    String recipientUid,
+    Map<String, dynamic> details,
+  ) async {
+    try {
+      await _db
+          .collection('users')
+          .doc(recipientUid)
+          .collection('notifications')
+          .add({
+        ...details,
+        'createdAt': FieldValue.serverTimestamp(),
+        'read': false,
+      });
+    } catch (_) {
+      // A notification failure must not undo or misreport the user's action.
+    }
+  }
+
   Stream<List<Map<String, dynamic>>> notificationsStream() => _doc.collection('notifications').orderBy('createdAt', descending: true).limit(50).snapshots().map((s) => s.docs.map((d) => {...d.data(), 'id': d.id}).toList());
 
-  Future<void> markNotificationRead(String id) => _doc.collection('notifications').doc(id).set({'read': true}, SetOptions(merge: true));
+  Future<void> markNotificationRead(String id) =>
+      _doc.collection('notifications').doc(id).update({'read': true});
 
   // ---------------------------------------------------------------- profile
 
@@ -457,11 +618,10 @@ class UserDataService {
 
   // -------------------------------------------------------------- favorites
 
-  Stream<Set<String>> favoriteIdsStream() {
-    return _favorites
-        .snapshots()
-        .map((snap) => snap.docs.map((d) => d.id).toSet());
-  }
+  Stream<Set<String>> favoriteIdsStream() => _favorites
+      .snapshots()
+      .map((snapshot) => snapshot.docs.map((doc) => doc.id).toSet())
+      .asBroadcastStream();
 
   Future<void> setFavorite(String animeId, bool value) {
     final ref = _favorites.doc(animeId);
@@ -484,16 +644,12 @@ class UserDataService {
 
   /// Only this account's posts (used for the post counter on Profile).
   /// Sorted on the device so no composite index is needed.
-  Stream<List<UserPost>> myPostsStream() {
-    return _posts
-        .where('uid', isEqualTo: _user.uid)
-        .snapshots()
-        .map((snap) {
-      final list = snap.docs.map(UserPost.fromDoc).toList();
-      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      return list;
-    });
-  }
+  Stream<List<UserPost>> myPostsStream() =>
+      _posts.where('uid', isEqualTo: _user.uid).snapshots().map((snapshot) {
+        final posts = snapshot.docs.map(UserPost.fromDoc).toList();
+        posts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        return posts;
+      }).asBroadcastStream();
 
   /// Max size of the encoded photo. A Firestore document is limited to
   /// 1 MiB, so keep a safe margin for the text fields.

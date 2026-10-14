@@ -6,9 +6,10 @@ import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../screens/login_screen.dart';
-import '../screens/settings_screen.dart';
+import '../screens/profile_screen.dart';
 import '../services/user_data_service.dart';
 import 'minimal_ui.dart';
+import 'app_motion.dart';
 
 /// Which tab of the main screen is showing (0 Home, 1 Search, 2 Profile).
 /// Shared so the avatar menu can jump to the Profile tab from any page.
@@ -22,7 +23,7 @@ Future<void> signOutAndGoToLogin(BuildContext context) async {
   mainTabIndex.value = 0;
   if (navigator.mounted) {
     navigator.pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      AppMotion.route(builder: (_) => const LoginScreen()),
       (route) => false,
     );
   }
@@ -103,7 +104,7 @@ class AccountMenuButton extends StatelessWidget {
         mainTabIndex.value = 2;
       case _AccountAction.settings:
         Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const SettingsScreen()),
+          AppMotion.route(builder: (_) => const ProfileScreen(focusSettings: true)),
         );
       case _AccountAction.logout:
         // Signs out right away, no confirmation.

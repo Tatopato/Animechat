@@ -35,6 +35,36 @@ class MyApp extends StatelessWidget {
           colorScheme: ColorScheme.fromSeed(
             seedColor: dark ? Mi.violet : Mi.accent,
             brightness: dark ? Brightness.dark : Brightness.light,
+          ).copyWith(
+            surface: Mi.surface,
+            onSurface: Mi.text,
+            onSurfaceVariant: Mi.sub,
+          ),
+          textTheme: ThemeData(
+            brightness: dark ? Brightness.dark : Brightness.light,
+          ).textTheme.apply(bodyColor: Mi.text, displayColor: Mi.text),
+          primaryTextTheme: ThemeData(
+            brightness: dark ? Brightness.dark : Brightness.light,
+          ).primaryTextTheme.apply(bodyColor: Mi.text, displayColor: Mi.text),
+          iconTheme: IconThemeData(color: Mi.text),
+          listTileTheme: const ListTileThemeData(
+            mouseCursor: WidgetStateMouseCursor.clickable,
+          ),
+          textButtonTheme: const TextButtonThemeData(
+            style: ButtonStyle(mouseCursor: WidgetStateMouseCursor.clickable),
+          ),
+          outlinedButtonTheme: const OutlinedButtonThemeData(
+            style: ButtonStyle(mouseCursor: WidgetStateMouseCursor.clickable),
+          ),
+          filledButtonTheme: const FilledButtonThemeData(
+            style: ButtonStyle(mouseCursor: WidgetStateMouseCursor.clickable),
+          ),
+          iconButtonTheme: const IconButtonThemeData(
+            style: ButtonStyle(mouseCursor: WidgetStateMouseCursor.clickable),
+          ),
+          inputDecorationTheme: InputDecorationTheme(
+            hintStyle: Mi.body(color: Mi.sub),
+            labelStyle: Mi.body(color: Mi.sub),
           ),
           scaffoldBackgroundColor: Mi.bg,
           useMaterial3: true,

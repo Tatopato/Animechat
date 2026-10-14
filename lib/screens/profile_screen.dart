@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../constants/account_menu.dart';
+import '../constants/app_motion.dart';
 import '../constants/minimal_ui.dart';
 import '../data/anime_catalog.dart';
 import '../services/user_data_service.dart';
@@ -17,7 +19,8 @@ import 'home_screen.dart' show PostDetailScreen, showEditPostSheet, confirmDelet
 
 /// Profile: name, photo, bio, stats and favorites of the signed-in account.
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  const ProfileScreen({super.key, this.focusSettings = false});
+  final bool focusSettings;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -25,19 +28,28 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final _service = UserDataService.instance;
+  final _settingsKey = GlobalKey();
 
   late final Stream<UserProfile> _profile = _service.profileStream();
   late Stream<Set<String>> _favorites = _service.favoriteIdsStream();
   late Stream<List<UserPost>> _posts = _service.myPostsStream();
+  late Stream<List<UserPost>> _savedPosts = _service.savedPostsStream();
   late final Stream<List<Map<String, dynamic>>> _friends = _service.friendsStream();
   late final Stream<List<FriendRequest>> _requests = _service.friendRequestsStream();
-  late Future<List<Anime>> _animeCatalog = AnimeCatalogService.instance.topAnime();
   bool _showAllPosts = false;
 
   @override
   void initState() {
     super.initState();
     ThemeController.isDarkMode.addListener(_onThemeChanged);
+    if (widget.focusSettings) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final target = _settingsKey.currentContext;
+        if (mounted && target != null) {
+          Scrollable.ensureVisible(target, duration: const Duration(milliseconds: 450), curve: Curves.easeInOut, alignment: 0.08);
+        }
+      });
+    }
   }
 
   void _onThemeChanged() {
@@ -81,19 +93,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 18),
               _buildStats(),
               const SizedBox(height: 28),
-              const MiSectionHeader(title: 'My posts'),
-              const SizedBox(height: 12),
-              _buildMyPosts(),
+              _profileEntryCard(
+                icon: Icons.article_outlined,
+                title: 'My posts',
+                subtitle: 'View, edit or delete your posts',
+                onTap: () {
+                  _posts = _service.myPostsStream();
+                  _openProfileCollection('My posts', _buildMyPosts());
+                },
+              ),
+              _profileEntryCard(
+                icon: Icons.bookmark_outline_rounded,
+                title: 'Saved posts',
+                subtitle: 'Posts saved from the community',
+                onTap: () {
+                  _savedPosts = _service.savedPostsStream();
+                  _openProfileCollection('Saved posts', _buildSavedPosts());
+                },
+              ),
+              _profileEntryCard(
+                icon: Icons.favorite_border_rounded,
+                title: 'Favorites',
+                subtitle: 'Anime you have liked',
+                onTap: () {
+                  _favorites = _service.favoriteIdsStream();
+                  _openProfileCollection('Favorites', _buildFavorites());
+                },
+              ),
               const SizedBox(height: 28),
-              const MiSectionHeader(title: 'Favorites'),
-              const SizedBox(height: 14),
-              _buildFavorites(),
-              const SizedBox(height: 28),
-              const MiSectionHeader(title: 'Settings'),
-              const SizedBox(height: 14),
-              _buildSettingsCard(),
-              const SizedBox(height: 20),
-              _buildLogout(),
+              Container(
+                key: _settingsKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _settingsSectionLabel('Settings'),
+                    const SizedBox(height: 14),
+                    _buildSettingsContent(),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -106,6 +144,74 @@ class _ProfileScreenState extends State<ProfileScreen> {
     child: Row(children: [const Icon(Icons.badge_outlined, color: Mi.accent), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Your UID', style: Mi.caption()), SelectableText(uid, style: Mi.body(size: 13, weight: FontWeight.w700))])), IconButton(tooltip: 'Copy UID', icon: Icon(Icons.copy_rounded, color: Mi.sub, size: 19), onPressed: () { Clipboard.setData(ClipboardData(text: uid)); miSnack(context, 'UID copied.'); })]),
   );
 
+  void _openProfileCollection(String title, Widget content) {
+    Navigator.of(context).push(
+      AppMotion.route(
+        builder: (_) => _ProfileCollectionScreen(title: title, content: content),
+      ),
+    );
+  }
+
+  Widget _profileEntryCard({
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+    IconData icon = Icons.auto_awesome_rounded,
+    Widget? leading,
+    Widget? trailing,
+    Widget? footer,
+  }) =>
+      Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: Mi.card(),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: Column(
+            children: [
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: onTap,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      child: Row(
+                        children: [
+                          leading ?? Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: Mi.tint,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Icon(icon, color: Mi.violet, size: 21),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.body(weight: FontWeight.w700)),
+                                const SizedBox(height: 3),
+                                Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.caption()),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          trailing ?? Icon(Icons.chevron_right_rounded, color: Mi.sub),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              ?footer,
+            ],
+          ),
+        ),
+      );
+
   Widget _buildMyPosts() => StreamBuilder<List<UserPost>>(
         stream: _posts,
         builder: (context, snapshot) {
@@ -114,42 +220,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onRetry: () => setState(() => _posts = _service.myPostsStream()),
             );
           }
-          if (!snapshot.hasData) return const MiFeedSkeleton(count: 1);
+          if (!snapshot.hasData) return _profileEntriesSkeleton();
           final posts = snapshot.data!;
           if (posts.isEmpty) return const MiEmpty(icon: Icons.edit_note_rounded, text: 'Your posts will appear here.');
           final shownPosts = _showAllPosts || posts.length <= 3 ? posts : posts.take(3).toList();
           return Column(children: [
             for (final post in shownPosts)
-              Container(
-                width: double.infinity,
-                margin: const EdgeInsets.only(bottom: 10),
-                decoration: Mi.card(),
-                child: Column(children: [
-                  InkWell(
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PostDetailScreen(post: post))),
-                    borderRadius: BorderRadius.circular(16),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
-                      child: Row(children: [
-                        if (post.imageBase64 != null) const Icon(Icons.photo_outlined, color: Mi.accent),
-                        if (post.imageBase64 != null) const SizedBox(width: 8),
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(post.caption.isEmpty ? 'Shared ${animeById(post.animeId ?? '')?.title ?? 'a post'}' : post.caption, maxLines: 3, overflow: TextOverflow.ellipsis, style: Mi.body()),
-                          const SizedBox(height: 5),
-                          Text(timeAgo(post.createdAt), style: Mi.caption()),
-                        ])),
-                        Icon(Icons.chevron_right_rounded, color: Mi.sub),
-                      ]),
-                    ),
+              _profileEntryCard(
+                icon: post.imageBase64 == null ? Icons.article_outlined : Icons.image_outlined,
+                title: post.caption.isEmpty
+                    ? 'Shared ${post.animeTitle ?? animeById(post.animeId ?? '')?.title ?? 'a post'}'
+                    : post.caption,
+                subtitle: timeAgo(post.createdAt),
+                onTap: () => Navigator.of(context).push(
+                  AppMotion.route(builder: (_) => PostDetailScreen(post: post)),
+                ),
+                footer: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton.icon(
+                        onPressed: () => showEditPostSheet(context, post),
+                        icon: const Icon(Icons.edit_outlined, size: 16),
+                        label: const Text('Edit'),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => confirmDeletePost(context, post),
+                        icon: const Icon(Icons.delete_outline, size: 16),
+                        label: const Text('Delete'),
+                      ),
+                    ],
                   ),
-                  if (post.isMine) Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-                    child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-                      TextButton.icon(onPressed: () => showEditPostSheet(context, post), icon: const Icon(Icons.edit_outlined, size: 16), label: const Text('Edit')),
-                      TextButton.icon(onPressed: () => confirmDeletePost(context, post), icon: const Icon(Icons.delete_outline, size: 16), label: const Text('Delete')),
-                    ]),
-                  ),
-                ]),
+                ),
               ),
             if (posts.length > 3)
               TextButton.icon(
@@ -161,55 +264,75 @@ class _ProfileScreenState extends State<ProfileScreen> {
         },
       );
 
+  Widget _buildSavedPosts() => StreamBuilder<List<UserPost>>(
+        stream: _savedPosts,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return MiDataError(
+              onRetry: () => setState(
+                () => _savedPosts = _service.savedPostsStream(),
+              ),
+            );
+          }
+          if (!snapshot.hasData) return _profileEntriesSkeleton();
+          final posts = snapshot.data!;
+          if (posts.isEmpty) {
+            return const MiEmpty(
+              icon: Icons.bookmark_border_rounded,
+              text: 'Posts you save from the community will appear here.',
+            );
+          }
+          return Column(
+            children: [
+              for (final post in posts)
+                _profileEntryCard(
+                  icon: Icons.bookmark_rounded,
+                  title: post.caption.isEmpty
+                      ? 'Shared ${post.animeTitle ?? animeById(post.animeId ?? '')?.title ?? 'a post'}'
+                      : post.caption,
+                  subtitle: '${post.authorName} · ${timeAgo(post.createdAt)}',
+                  onTap: () => Navigator.of(context).push(
+                    AppMotion.route(builder: (_) => PostDetailScreen(post: post)),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Remove saved post',
+                        icon: Icon(Icons.bookmark_remove_outlined, color: Mi.sub),
+                        onPressed: () async {
+                          try {
+                            await _service.setPostSaved(post.id, false);
+                          } catch (_) {
+                            if (context.mounted) {
+                              miSnack(context, 'Could not remove saved post.');
+                            }
+                          }
+                        },
+                      ),
+                      Icon(Icons.chevron_right_rounded, color: Mi.sub),
+                    ],
+                  ),
+                ),
+            ],
+          );
+        },
+      );
+
   Widget _buildFriends() => StreamBuilder<List<Map<String, dynamic>>>(
         stream: _friends,
         builder: (context, snapshot) {
           if (snapshot.hasError) return const MiDataError();
-          if (!snapshot.hasData) return const MiLoading();
-          final friends = snapshot.data!;
-          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [const Expanded(child: MiSectionHeader(title: 'Friends')), Text('${friends.length}', style: Mi.caption())]),
-            const SizedBox(height: 8),
-            if (friends.isEmpty)
-              Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Your accepted friends will appear here.', style: Mi.caption()))
-            else
-              for (final friend in friends)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  decoration: Mi.card(),
-                  child: ListTile(
-                    leading: CircleAvatar(backgroundColor: Mi.tint, child: const Icon(Icons.person_rounded, color: Mi.violet)),
-                    title: Text((friend['name'] as String?) ?? 'Friend', style: Mi.body()),
-                    subtitle: Text((friend['uid'] as String?) ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.caption()),
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: friend['uid'] as String))),
-                    trailing: IconButton(
-                      tooltip: 'Remove friend',
-                      icon: const Icon(Icons.person_remove_outlined, color: Mi.danger),
-                      onPressed: () async {
-                        final remove = await showDialog<bool>(
-                          context: context,
-                          builder: (dialogContext) => AlertDialog(
-                            backgroundColor: Mi.surface,
-                            title: const Text('Remove friend?'),
-                            content: Text('Remove ${(friend['name'] as String?) ?? 'this friend'} from your friends list?', style: Mi.body()),
-                            actions: [
-                              TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
-                              TextButton(onPressed: () => Navigator.pop(dialogContext, true), child: Text('Remove', style: Mi.body(color: Mi.danger))),
-                            ],
-                          ),
-                        );
-                        if (remove != true || !context.mounted) return;
-                        try {
-                          await _service.removeFriend(friend['uid'] as String);
-                          if (context.mounted) miSnack(context, 'Friend removed.');
-                        } catch (_) {
-                          if (context.mounted) miSnack(context, 'Could not remove friend.');
-                        }
-                      },
-                    ),
-                  ),
-                ),
-          ]);
+          final count = snapshot.data?.length;
+          return _profileEntryCard(
+            icon: Icons.people_alt_outlined,
+            title: 'Friends',
+            subtitle: count == null ? 'View and search your friends' : '$count friends · View and search',
+            onTap: () => _openProfileCollection(
+              'Friends',
+              _FriendsCollectionContent(service: _service),
+            ),
+          );
         },
       );
 
@@ -352,49 +475,75 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildFavorites() {
     return StreamBuilder<Set<String>>(
       stream: _favorites,
-      initialData: const <String>{},
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return MiDataError(
             onRetry: () => setState(() {
               _favorites = _service.favoriteIdsStream();
-              _animeCatalog = AnimeCatalogService.instance.topAnime(refresh: true);
             }),
           );
         }
+        if (!snapshot.hasData) return _favoritesSkeleton();
+        final ids = snapshot.data!;
+        if (ids.isEmpty) {
+          return const MiEmpty(
+            icon: Icons.favorite_border_rounded,
+            text: 'No favorites yet.\nTap the heart on any anime.',
+          );
+        }
         return FutureBuilder<List<Anime>>(
-          future: _animeCatalog,
-          initialData: animeCatalog.isEmpty ? null : animeCatalog,
+          future: AnimeCatalogService.instance.animeByIds(ids),
           builder: (context, animeSnapshot) {
             if (animeSnapshot.hasError) {
               return MiDataError(
-                text: 'โหลดรายการอนิเมะไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่',
-                onRetry: () => setState(() => _animeCatalog = AnimeCatalogService.instance.topAnime(refresh: true)),
+                text: 'โหลดรายการโปรดไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่',
+                onRetry: () => setState(() {}),
               );
             }
             if (!animeSnapshot.hasData) return _favoritesSkeleton();
-            final ids = snapshot.data!;
-            final items = animeSnapshot.data!
-                .where((anime) => ids.contains(anime.id))
-                .toList();
+            final items = animeSnapshot.data!;
             if (items.isEmpty) {
               return const MiEmpty(
-                icon: Icons.favorite_border_rounded,
-                text: 'No favorites yet.\nTap the heart on any anime.',
+                icon: Icons.cloud_off_rounded,
+                text: 'ไม่พบข้อมูลอนิเมะที่บันทึกไว้ ลองโหลดใหม่อีกครั้ง',
               );
             }
-            return SizedBox(
-              height: 310,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                clipBehavior: Clip.none,
-                itemCount: items.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 14),
-                itemBuilder: (context, index) => SizedBox(
-                  width: 128,
-                  child: AnimeTile(anime: items[index], isFavorite: true),
-                ),
-              ),
+            return Column(
+              children: [
+                for (final anime in items)
+                  _profileEntryCard(
+                    title: anime.title,
+                    subtitle: '${anime.score == null ? 'No rating' : '★ ${anime.score!.toStringAsFixed(1)}'} · ${anime.episodes == null ? 'Episodes TBA' : '${anime.episodes} eps'} · ${anime.seasonLabel}',
+                    leading: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.network(
+                        anime.imageUrl,
+                        width: 44,
+                        height: 48,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => Container(
+                          width: 44,
+                          height: 48,
+                          color: Mi.tint,
+                          alignment: Alignment.center,
+                          child: Icon(Icons.movie_outlined, color: Mi.violet, size: 21),
+                        ),
+                      ),
+                    ),
+                    onTap: () => showAnimeSheet(context, anime),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Remove favorite',
+                          onPressed: () => toggleFavorite(context, anime, true),
+                          icon: const Icon(Icons.favorite_rounded, color: Mi.accent, size: 19),
+                        ),
+                        Icon(Icons.chevron_right_rounded, color: Mi.sub),
+                      ],
+                    ),
+                  ),
+              ],
             );
           },
         );
@@ -402,41 +551,130 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _favoritesSkeleton() => SizedBox(
-        height: 310,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: 3,
-          separatorBuilder: (_, _) => const SizedBox(width: 14),
-          itemBuilder: (_, _) => const SizedBox(
-            width: 128,
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              MiSkeletonBlock(width: 128, height: 190, radius: 14),
-              SizedBox(height: 10),
-              MiSkeletonBlock(width: 108, height: 12),
-              SizedBox(height: 7),
-              MiSkeletonBlock(width: 78, height: 10),
-            ]),
+  Widget _favoritesSkeleton() => _profileEntriesSkeleton(showImage: true);
+
+  Widget _profileEntriesSkeleton({bool showImage = false}) => Column(
+        children: List.generate(
+          1,
+          (_) => Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: Mi.card(),
+            child: Row(
+              children: [
+                MiSkeletonBlock(
+                  width: showImage ? 44 : 40,
+                  height: showImage ? 48 : 40,
+                  radius: showImage ? 12 : 14,
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      MiSkeletonBlock(width: 150, height: 12),
+                      SizedBox(height: 7),
+                      MiSkeletonBlock(width: 115, height: 10),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: Mi.sub),
+              ],
+            ),
           ),
         ),
       );
 
   // -------------------------------------------------------------- settings
 
-  Widget _buildSettingsCard() {
-    return Container(
-      decoration: Mi.card(),
-      child: SettingsTile(
-        icon: Icons.settings_outlined,
-        title: 'Settings',
-        subtitle: 'Password, about and more',
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const SettingsScreen()),
+  Widget _buildSettingsContent() {
+    final email = FirebaseAuth.instance.currentUser?.email ?? '';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _settingsSectionLabel('Account'),
+        const SizedBox(height: 12),
+        Container(
+          decoration: Mi.card(),
+          child: Column(children: [
+            SwitchListTile.adaptive(
+              secondary: Container(width: 36, height: 36, decoration: BoxDecoration(color: Mi.tint, borderRadius: BorderRadius.circular(12)), child: Icon(ThemeController.isDarkMode.value ? Icons.dark_mode_rounded : Icons.light_mode_rounded, color: Mi.violet, size: 20)),
+              title: Text('Dark mode', style: Mi.body(weight: FontWeight.w700)),
+              subtitle: Text('Use a darker color theme', style: Mi.caption()),
+              value: ThemeController.isDarkMode.value,
+              onChanged: (value) async {
+                final previous = ThemeController.isDarkMode.value;
+                try {
+                  await ThemeController.saveForSignedInUser(value);
+                } catch (_) {
+                  ThemeController.isDarkMode.value = previous;
+                  if (mounted) miSnack(context, 'Could not save the theme setting.');
+                }
+              },
+            ),
+            Divider(height: 1, indent: 62, color: Mi.line),
+            SettingsTile(icon: Icons.alternate_email_rounded, title: 'Email', subtitle: email.isEmpty ? 'No email on this account' : email, onTap: null),
+            Divider(height: 1, indent: 62, color: Mi.line),
+            SettingsTile(
+              icon: Icons.lock_reset_rounded,
+              title: 'Change password',
+              subtitle: 'Send a reset link to your email',
+              onTap: () async {
+                if (email.isEmpty) {
+                  miSnack(context, 'This account has no email address.');
+                  return;
+                }
+                try {
+                  await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+                  if (mounted) miSnack(context, 'Reset link sent to $email');
+                } on FirebaseAuthException catch (error) {
+                  if (mounted) miSnack(context, error.message ?? "Couldn't send the reset email.");
+                } catch (_) {
+                  if (mounted) miSnack(context, "Couldn't send the reset email.");
+                }
+              },
+            ),
+          ]),
         ),
-      ),
+        const SizedBox(height: 28),
+        _settingsSectionLabel('App'),
+        const SizedBox(height: 12),
+        Container(
+          decoration: Mi.card(),
+          child: SettingsTile(
+            icon: Icons.info_outline_rounded,
+            title: 'About',
+            subtitle: 'Anime App 1.0.0',
+            onTap: () => showAboutDialog(context: context, applicationName: 'Anime App', applicationVersion: '1.0.0'),
+          ),
+        ),
+        const SizedBox(height: 20),
+        _buildLogout(),
+      ],
     );
   }
+
+  Widget _settingsSectionLabel(String title) => Row(
+        children: [
+          Container(
+            width: 4,
+            height: 18,
+            decoration: BoxDecoration(
+              gradient: Mi.brand,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            title,
+            style: Mi.body(
+              size: 17,
+              color: Mi.isDark ? Colors.white : const Color(0xFF21152B),
+              weight: FontWeight.w800,
+            ),
+          ),
+        ],
+      );
 
   Widget _buildLogout() {
     return SizedBox(
@@ -525,10 +763,166 @@ class _FriendToolsState extends State<_FriendTools> {
       return Column(children: [for (final request in requests) Container(margin: const EdgeInsets.only(bottom: 8), decoration: Mi.card(), child: ListTile(
         title: Text(request.name, style: Mi.body()), subtitle: Text(request.uid, style: Mi.caption()),
         trailing: Wrap(spacing: 2, children: [IconButton(tooltip: 'Accept', icon: const Icon(Icons.check_circle, color: Mi.accent), onPressed: () async { try { await widget.service.acceptFriend(request); } catch (_) { if (context.mounted) miSnack(context, 'Could not accept request.'); } }), IconButton(tooltip: 'Decline', icon: Icon(Icons.cancel_outlined, color: Mi.sub), onPressed: () async { try { await widget.service.rejectFriend(request); } catch (_) { if (context.mounted) miSnack(context, 'Could not decline request.'); } })]),
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: request.uid))),
+        onTap: () => Navigator.of(context).push(AppMotion.route(builder: (_) => PublicProfileScreen(uid: request.uid))),
       ))]);
     }),
   ]);
+}
+
+class _FriendsCollectionContent extends StatefulWidget {
+  const _FriendsCollectionContent({required this.service});
+
+  final UserDataService service;
+
+  @override
+  State<_FriendsCollectionContent> createState() => _FriendsCollectionContentState();
+}
+
+class _FriendsCollectionContentState extends State<_FriendsCollectionContent> {
+  final _search = TextEditingController();
+  String _query = '';
+  late Stream<List<Map<String, dynamic>>> _friends;
+  Timer? _loadTimer;
+  bool _waitingForFriends = true;
+  bool _loadTimedOut = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _friends = widget.service.friendsStream();
+    _startLoadTimer();
+  }
+
+  void _startLoadTimer() {
+    _loadTimer?.cancel();
+    _loadTimer = Timer(const Duration(seconds: 12), () {
+      if (mounted && _waitingForFriends) setState(() => _loadTimedOut = true);
+    });
+  }
+
+  void _retryLoadingFriends() {
+    setState(() {
+      _friends = widget.service.friendsStream();
+      _waitingForFriends = true;
+      _loadTimedOut = false;
+    });
+    _startLoadTimer();
+  }
+
+  @override
+  void dispose() {
+    _loadTimer?.cancel();
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _search,
+            onChanged: (value) => setState(() => _query = value.trim().toLowerCase()),
+            decoration: InputDecoration(
+              hintText: 'Search friends by name or UID',
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: _query.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: () {
+                        _search.clear();
+                        setState(() => _query = '');
+                      },
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+              filled: true,
+              fillColor: Mi.surface,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide(color: Mi.line)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide(color: Mi.line)),
+            ),
+          ),
+          const SizedBox(height: 14),
+          StreamBuilder<List<Map<String, dynamic>>>(
+            stream: _friends,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                _waitingForFriends = false;
+                _loadTimer?.cancel();
+                return MiDataError(onRetry: _retryLoadingFriends);
+              }
+              if (!snapshot.hasData) {
+                return _loadTimedOut
+                    ? MiDataError(
+                        text: 'โหลดรายชื่อเพื่อนไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วลองอีกครั้ง',
+                        onRetry: _retryLoadingFriends,
+                      )
+                    : const MiLoading();
+              }
+              _waitingForFriends = false;
+              _loadTimer?.cancel();
+              final friends = snapshot.data!;
+              final filtered = friends.where((friend) {
+                final name = (friend['name'] as String? ?? 'Friend').toLowerCase();
+                final uid = (friend['uid'] as String? ?? '').toLowerCase();
+                return name.contains(_query) || uid.contains(_query);
+              }).toList();
+              if (friends.isEmpty) {
+                return const MiEmpty(icon: Icons.people_outline_rounded, text: 'Your accepted friends will appear here.');
+              }
+              if (filtered.isEmpty) {
+                return const MiEmpty(icon: Icons.search_off_rounded, text: 'No friends match this search.');
+              }
+              return Column(
+                children: [
+                  for (final friend in filtered)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      decoration: Mi.card(),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+                        leading: FriendAvatar(uid: friend['uid'] as String, name: friend['name'] as String? ?? 'Friend', size: 44),
+                        title: Text(friend['name'] as String? ?? 'Friend', maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.body(weight: FontWeight.w700)),
+                        subtitle: Text(friend['uid'] as String? ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.caption()),
+                        trailing: IconButton(
+                          tooltip: 'Remove friend',
+                          icon: const Icon(Icons.person_remove_outlined, color: Mi.danger),
+                          onPressed: () => _removeFriend(friend),
+                        ),
+                        onTap: () => Navigator.of(context).push(AppMotion.route(builder: (_) => PublicProfileScreen(uid: friend['uid'] as String))),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ],
+      );
+
+  Future<void> _removeFriend(Map<String, dynamic> friend) async {
+    final uid = friend['uid'] as String?;
+    if (uid == null) return;
+    final name = friend['name'] as String? ?? 'this friend';
+    final remove = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Mi.surface,
+        title: const Text('Remove friend?'),
+        content: Text('Remove $name from your friends list?', style: Mi.body()),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(dialogContext, true), child: Text('Remove', style: Mi.body(color: Mi.danger))),
+        ],
+      ),
+    );
+    if (remove != true || !mounted) return;
+    try {
+      await widget.service.removeFriend(uid);
+      if (mounted) miSnack(context, 'Friend removed.');
+    } catch (_) {
+      if (mounted) miSnack(context, 'Could not remove friend.');
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -867,7 +1261,9 @@ class _AvatarOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(3),
@@ -880,6 +1276,33 @@ class _AvatarOption extends StatelessWidget {
         ),
         child: child,
       ),
+      ),
     );
   }
+}
+
+class _ProfileCollectionScreen extends StatelessWidget {
+  const _ProfileCollectionScreen({required this.title, required this.content});
+
+  final String title;
+  final Widget content;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: Mi.bg,
+        appBar: AppBar(
+          title: Text(title, style: Mi.title(size: 20)),
+          backgroundColor: Mi.bg,
+          surfaceTintColor: Colors.transparent,
+        ),
+        body: MiBackdrop(
+          child: SafeArea(
+            top: false,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+              children: [content],
+            ),
+          ),
+        ),
+      );
 }

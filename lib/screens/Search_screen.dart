@@ -270,7 +270,9 @@ class _SearchScreenState extends State<SearchScreen> {
               Row(
                 children: [
                   Expanded(child: Text('Recent', style: Mi.caption())),
-                  GestureDetector(
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
                     onTap: () async {
                       try {
                         await _service.clearRecentSearches();
@@ -287,6 +289,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         color: Mi.accent,
                         weight: FontWeight.w700,
                       ),
+                    ),
                     ),
                   ),
                 ],

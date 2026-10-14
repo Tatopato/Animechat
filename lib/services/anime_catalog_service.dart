@@ -26,6 +26,62 @@ class AnimeCatalogService {
   final Map<String, Future<List<Anime>>> _searchRequests = {};
   final Map<String, Future<AnimeDetails>> _detailsRequests = {};
   final Map<String, Future<Anime?>> _animeRequests = {};
+  final Map<String, Future<List<Anime>>> _favoriteAnimeRequests = {};
+
+  /// Loads the exact saved anime ids for a user's Favorites list in batches.
+  Future<List<Anime>> animeByIds(
+    Iterable<String> ids, {
+    bool refresh = false,
+  }) {
+    final normalizedIds = ids.toSet().toList()..sort();
+    if (normalizedIds.isEmpty) return Future.value(const <Anime>[]);
+    final key = normalizedIds.join(',');
+    if (refresh) _favoriteAnimeRequests.remove(key);
+    final existing = _favoriteAnimeRequests[key];
+    if (existing != null) return existing;
+
+    final request = () async {
+      final found = <String, Anime>{
+        for (final anime in animeCatalog)
+          if (normalizedIds.contains(anime.id)) anime.id: anime,
+      };
+      final numericIds = normalizedIds
+          .where((id) => !found.containsKey(id))
+          .map(int.tryParse)
+          .whereType<int>()
+          .toList(growable: false);
+      for (var start = 0; start < numericIds.length; start += 50) {
+        final batch = numericIds.skip(start).take(50).toList();
+        final results = await _request('''
+          query {
+            Page(page: 1, perPage: ${batch.length}) {
+              media(type: ANIME, id_in: [${batch.join(',')}], isAdult: false) {
+                $_queryFields
+              }
+            }
+          }
+        ''');
+        for (final anime in results) {
+          found[anime.id] = anime;
+        }
+      }
+      return normalizedIds
+          .map((id) => found[id])
+          .whereType<Anime>()
+          .toList(growable: false);
+    }();
+
+    _favoriteAnimeRequests[key] = request;
+    request.then<void>(
+      (_) {},
+      onError: (Object _) {
+        if (identical(_favoriteAnimeRequests[key], request)) {
+          _favoriteAnimeRequests.remove(key);
+        }
+      },
+    );
+    return request;
+  }
 
   /// Resolves tagged anime for older posts that predate saved poster metadata.
   Future<Anime?> animeById(String id) {

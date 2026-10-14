@@ -5,6 +5,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'app_motion.dart';
+
 /// Shared "anime" look for the Login and Register screens:
 /// poster slideshow background, falling sakura petals, floating poster fan,
 /// frosted glass card, neon fields and gradient buttons.
@@ -766,11 +768,4 @@ void showAnimeSnackBar(BuildContext context, String message) {
   );
 }
 
-Route<T> animeFadeRoute<T>(Widget page) {
-  return PageRouteBuilder<T>(
-    transitionDuration: const Duration(milliseconds: 450),
-    pageBuilder: (_, _, _) => page,
-    transitionsBuilder: (_, animation, _, child) =>
-        FadeTransition(opacity: animation, child: child),
-  );
-}
+Route<T> animeFadeRoute<T>(Widget page) => AppMotion.page<T>(page);

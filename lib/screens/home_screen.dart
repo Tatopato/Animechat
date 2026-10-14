@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -8,9 +9,11 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../constants/account_menu.dart';
+import '../constants/app_motion.dart';
 import '../constants/minimal_ui.dart';
 import '../data/anime_catalog.dart';
 import '../services/user_data_service.dart';
+import 'chat_screen.dart';
 import 'public_profile_screen.dart';
 import '../services/anime_catalog_service.dart';
 import '../services/theme_controller.dart';
@@ -28,6 +31,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _service = UserDataService.instance;
   final _trendingController = ScrollController();
+  final _genreController = ScrollController();
+  final _communityKey = GlobalKey();
+  final Map<String, GlobalKey> _postKeys = {};
 
   late final Stream<UserProfile> _profile = _service.profileStream();
   late final Stream<UserProfile> _composerProfile = _service.profileStream();
@@ -50,6 +56,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     ThemeController.isDarkMode.removeListener(_onThemeChanged);
     _trendingController.dispose();
+    _genreController.dispose();
     super.dispose();
   }
 
@@ -74,7 +81,10 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 14),
               _buildTrending(),
               const SizedBox(height: 28),
-              const MiSectionHeader(title: 'Community'),
+              KeyedSubtree(
+                key: _communityKey,
+                child: const MiSectionHeader(title: 'Community'),
+              ),
               const SizedBox(height: 14),
               _buildComposer(),
               const SizedBox(height: 14),
@@ -155,7 +165,120 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showNotifications(List<Map<String, dynamic>> notifications) {
-    showModalBottomSheet<void>(context: context, backgroundColor: Mi.surface, showDragHandle: true, builder: (sheetContext) => SafeArea(child: ListView(padding: const EdgeInsets.all(16), shrinkWrap: true, children: [Text('Notifications', style: Mi.title(size: 20)), const SizedBox(height: 8), if (notifications.isEmpty) Text('No notifications yet.', style: Mi.caption()), for (final item in notifications) ListTile(leading: const Icon(Icons.mode_comment_outlined, color: Mi.accent), title: Text('${item['fromName'] ?? 'Someone'} commented on your post', style: Mi.body()), subtitle: Text('${item['text'] ?? ''}', maxLines: 2, overflow: TextOverflow.ellipsis, style: Mi.caption()), onTap: () => _service.markNotificationRead(item['id'] as String))])));
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Mi.surface,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          shrinkWrap: true,
+          children: [
+            Text('Notifications', style: Mi.title(size: 20)),
+            const SizedBox(height: 8),
+            if (notifications.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Center(
+                  child: Text('No notifications yet.', style: Mi.caption()),
+                ),
+              ),
+            for (final item in notifications)
+              ListTile(
+                leading: Icon(_notificationIcon(item['type'] as String?), color: Mi.accent),
+                title: Text(
+                  _notificationTitle(item),
+                  style: Mi.body(
+                    weight: item['read'] == true
+                        ? FontWeight.w500
+                        : FontWeight.w700,
+                  ),
+                ),
+                subtitle: Text(
+                  _notificationSubtitle(item),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Mi.caption(),
+                ),
+                trailing: item['read'] == true
+                    ? null
+                    : const Icon(Icons.circle, size: 9, color: Mi.accent),
+                onTap: () => _openNotification(sheetContext, item),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _notificationIcon(String? type) => switch (type) {
+        'like' => Icons.favorite_rounded,
+        'friend_request' || 'friend_accepted' => Icons.person_add_alt_1_rounded,
+        'message' => Icons.chat_bubble_rounded,
+        _ => Icons.mode_comment_outlined,
+      };
+
+  String _notificationTitle(Map<String, dynamic> item) {
+    final name = item['fromName'] as String? ?? 'Someone';
+    return switch (item['type']) {
+      'like' => '$name liked your post',
+      'friend_request' => '$name sent you a friend request',
+      'friend_accepted' => '$name accepted your friend request',
+      'message' => '$name sent you a message',
+      _ => '$name commented on your post',
+    };
+  }
+
+  String _notificationSubtitle(Map<String, dynamic> item) {
+    final text = item['text'] as String?;
+    if (text?.isNotEmpty == true) return text!;
+    return switch (item['type']) {
+      'friend_request' => 'Tap to review the request in your profile.',
+      'friend_accepted' => 'You are now friends. Tap to open your profile.',
+      'message' => 'Tap to open your chats.',
+      _ => 'Tap to view the post.',
+    };
+  }
+
+  Future<void> _openNotification(
+    BuildContext sheetContext,
+    Map<String, dynamic> item,
+  ) async {
+    try {
+      await _service.markNotificationRead(item['id'] as String);
+    } catch (_) {
+      // Keep navigation available even if marking as read fails temporarily.
+    }
+    if (!mounted || !sheetContext.mounted) return;
+    Navigator.of(sheetContext).pop();
+    switch (item['type']) {
+      case 'friend_request':
+      case 'friend_accepted':
+        mainTabIndex.value = 2;
+        return;
+      case 'message':
+        ChatScreen.pendingConversation.value = {
+          'chatId': item['chatId'],
+          'chatName': item['chatName'] ?? item['fromName'] ?? 'Chat',
+          'isGroup': item['isGroup'] == true,
+          'members': item['members'] ?? const <String>[],
+        };
+        mainTabIndex.value = 1;
+        return;
+      default:
+        final postId = item['postId'] as String?;
+        final target = postId == null ? null : _postKeys[postId]?.currentContext;
+        final targetContext = target ?? _communityKey.currentContext;
+        if (targetContext != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            Scrollable.ensureVisible(
+              targetContext,
+              duration: const Duration(milliseconds: 420),
+              curve: Curves.easeOutCubic,
+            );
+          });
+        }
+    }
   }
 
   void _openAnimeSearch() {
@@ -179,46 +302,49 @@ class _HomeScreenState extends State<HomeScreen> {
       initialData: user == null ? null : UserProfile.fromData(null, user),
       builder: (context, snapshot) {
         final profile = snapshot.data;
-        return GestureDetector(
-          onTap: _openNewPost,
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
-            decoration: Mi.card(radius: 20),
-            child: Row(
-              children: [
-                if (profile != null) UserAvatar(profile: profile, size: 38),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 11,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Mi.bg,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      'What are you watching?',
-                      style: Mi.body(color: Mi.sub),
+        return MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: _openNewPost,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
+              decoration: Mi.card(radius: 20),
+              child: Row(
+                children: [
+                  if (profile != null) UserAvatar(profile: profile, size: 38),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 11,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Mi.bg,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        'What are you watching?',
+                        style: Mi.body(color: Mi.sub),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: Mi.brand,
+                  const SizedBox(width: 10),
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: Mi.brand,
+                    ),
+                    child: const Icon(
+                      Icons.add_photo_alternate_outlined,
+                      size: 20,
+                      color: Colors.white,
+                    ),
                   ),
-                  child: const Icon(
-                    Icons.add_photo_alternate_outlined,
-                    size: 20,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -249,13 +375,32 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 if (genres.isNotEmpty) ...[
                   SizedBox(
-                    height: 38,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      children: [
-                        _trendingGenreChip('All', null),
-                        for (final genre in genres) _trendingGenreChip(genre, genre),
-                      ],
+                    height: 46,
+                    child: Scrollbar(
+                      controller: _genreController,
+                      thumbVisibility: true,
+                      trackVisibility: true,
+                      interactive: true,
+                      thickness: 3,
+                      child: ScrollConfiguration(
+                        behavior: ScrollConfiguration.of(context).copyWith(
+                          dragDevices: const {
+                            PointerDeviceKind.touch,
+                            PointerDeviceKind.mouse,
+                            PointerDeviceKind.trackpad,
+                          },
+                        ),
+                        child: ListView(
+                          controller: _genreController,
+                          padding: const EdgeInsets.only(right: 16, bottom: 7),
+                          scrollDirection: Axis.horizontal,
+                          children: [
+                            _trendingGenreChip('All', null),
+                            for (final genre in genres)
+                              _trendingGenreChip(genre, genre),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -353,10 +498,13 @@ class _HomeScreenState extends State<HomeScreen> {
         return Column(
           children: [
             for (final post in posts) ...[
-              _PostCard(
-                post: post,
-                onDelete: () => _deletePost(post),
-                onEdit: () => showEditPostSheet(context, post),
+              KeyedSubtree(
+                key: _postKeys.putIfAbsent(post.id, () => GlobalKey()),
+                child: _PostCard(
+                  post: post,
+                  onDelete: () => _deletePost(post),
+                  onEdit: () => showEditPostSheet(context, post),
+                ),
               ),
               const SizedBox(height: 14),
             ],
@@ -502,7 +650,7 @@ class _PostCard extends StatelessWidget {
               MouseRegion(
                 cursor: SystemMouseCursors.click,
                 child: GestureDetector(
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: post.uid))),
+                  onTap: () => Navigator.of(context).push(AppMotion.route(builder: (_) => PublicProfileScreen(uid: post.uid))),
                   child: Container(
                     padding: const EdgeInsets.all(2),
                     decoration: const BoxDecoration(shape: BoxShape.circle, gradient: Mi.brand),
@@ -512,7 +660,7 @@ class _PostCard extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: post.uid))), child: Text(post.authorName, maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.body(weight: FontWeight.w700)))),
+                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(onTap: () => Navigator.of(context).push(AppMotion.route(builder: (_) => PublicProfileScreen(uid: post.uid))), child: Text(post.authorName, maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.body(weight: FontWeight.w700)))),
                 Row(children: [Text(timeAgo(post.createdAt), style: Mi.caption()), const SizedBox(width: 4), Icon(Icons.public_rounded, size: 12, color: Mi.sub)]),
               ])),
               if (post.isMine)
@@ -608,7 +756,7 @@ class _PostCard extends StatelessWidget {
                         padding: const EdgeInsets.all(12),
                         decoration: Mi.card(radius: 14),
                         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(onTap: () { final uid = comment['uid'] as String?; if (uid != null && uid.isNotEmpty) Navigator.of(context).push(MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: uid))); }, child: UserAvatar(profile: profile, size: 38))),
+                          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(onTap: () { final uid = comment['uid'] as String?; if (uid != null && uid.isNotEmpty) Navigator.of(context).push(AppMotion.route(builder: (_) => PublicProfileScreen(uid: uid))); }, child: UserAvatar(profile: profile, size: 38))),
                           const SizedBox(width: 10),
                           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                             Row(
@@ -621,7 +769,7 @@ class _PostCard extends StatelessWidget {
                                         final uid = comment['uid'] as String?;
                                         if (uid != null && uid.isNotEmpty) {
                                           Navigator.of(context).push(
-                                            MaterialPageRoute(
+                                            AppMotion.route(
                                               builder: (_) => PublicProfileScreen(uid: uid),
                                             ),
                                           );
@@ -713,7 +861,11 @@ class _PostActions extends StatelessWidget {
           stream: service.postLikedStream(post.id),
           builder: (context, likedSnapshot) {
             final liked = likedSnapshot.data ?? false;
-            return TextButton.icon(
+            return MouseRegion(
+              cursor: likedSnapshot.hasData
+                  ? SystemMouseCursors.click
+                  : SystemMouseCursors.basic,
+              child: TextButton.icon(
                 onPressed: likedSnapshot.hasData ? () async {
                   try {
                     await service.setPostLiked(post.id, !liked);
@@ -721,9 +873,24 @@ class _PostActions extends StatelessWidget {
                     if (context.mounted) miSnack(context, 'Could not update like.');
                   }
                 } : null,
-                icon: Icon(liked ? Icons.favorite_rounded : Icons.favorite_border_rounded, color: liked ? Mi.accent : Mi.sub, size: 18),
+                icon: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  switchInCurve: Curves.easeOutBack,
+                  switchOutCurve: Curves.easeIn,
+                  transitionBuilder: (child, animation) => ScaleTransition(
+                    scale: animation,
+                    child: FadeTransition(opacity: animation, child: child),
+                  ),
+                  child: Icon(
+                    liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                    key: ValueKey(liked),
+                    color: liked ? Mi.accent : Mi.sub,
+                    size: 18,
+                  ),
+                ),
                 label: const Text('Like'),
-              );
+              ),
+            );
           },
         ),
       ),
@@ -735,15 +902,42 @@ class _PostActions extends StatelessWidget {
         ),
       ),
       Expanded(
-        child: TextButton.icon(
-          onPressed: () async {
-            final animeUrl = post.animeId == null ? '' : 'https://anilist.co/anime/${post.animeId}';
-            final content = [post.caption, animeUrl].where((value) => value.isNotEmpty).join('\n');
-            await Clipboard.setData(ClipboardData(text: content.isEmpty ? 'Anime community post' : content));
-            if (context.mounted) miSnack(context, 'Post text copied for sharing.');
+        child: StreamBuilder<bool>(
+          stream: service.postSavedStream(post.id),
+          builder: (context, savedSnapshot) {
+            final saved = savedSnapshot.data ?? false;
+            final canSave = !post.isMine && savedSnapshot.hasData;
+            return MouseRegion(
+              cursor: canSave ? SystemMouseCursors.click : SystemMouseCursors.basic,
+              child: TextButton.icon(
+              onPressed: !canSave
+                  ? null
+                  : () async {
+                      try {
+                        await service.setPostSaved(post.id, !saved);
+                      } catch (_) {
+                        if (context.mounted) {
+                          miSnack(context, 'Could not update saved posts.');
+                        }
+                      }
+                    },
+              icon: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                transitionBuilder: (child, animation) => ScaleTransition(
+                  scale: animation,
+                  child: FadeTransition(opacity: animation, child: child),
+                ),
+                child: Icon(
+                  saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                  key: ValueKey(saved),
+                  size: 18,
+                  color: saved ? Mi.accent : Mi.sub,
+                ),
+              ),
+              label: Text(saved ? 'Saved' : 'Save'),
+              ),
+            );
           },
-          icon: const Icon(Icons.share_outlined, size: 17),
-          label: const Text('Share'),
         ),
       ),
     ]);
@@ -1157,7 +1351,9 @@ class _NewPostSheetState extends State<_NewPostSheet> {
         Positioned(
           top: 8,
           right: 8,
-          child: GestureDetector(
+          child: MouseRegion(
+            cursor: _saving ? SystemMouseCursors.basic : SystemMouseCursors.click,
+            child: GestureDetector(
             onTap: _saving ? null : () => setState(() => _image = null),
             child: Container(
               padding: const EdgeInsets.all(6),
@@ -1169,6 +1365,7 @@ class _NewPostSheetState extends State<_NewPostSheet> {
                   size: 18, color: Colors.white),
             ),
           ),
+          ),
         ),
       ],
     );
@@ -1176,9 +1373,24 @@ class _NewPostSheetState extends State<_NewPostSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: SingleChildScrollView(
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0.94, end: 1),
+      duration: const Duration(milliseconds: 360),
+      curve: Curves.easeOutBack,
+      builder: (context, scale, child) => Opacity(
+        opacity: ((scale - 0.94) / 0.06).clamp(0.0, 1.0),
+        child: Transform.scale(
+          scale: scale,
+          alignment: Alignment.bottomCenter,
+          child: Transform.translate(
+            offset: Offset(0, (1 - scale) * 14),
+            child: child,
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1219,7 +1431,9 @@ class _NewPostSheetState extends State<_NewPostSheet> {
                 itemBuilder: (context, index) {
                   final anime = animeList[index];
                   final selected = anime.id == _animeId;
-                  return GestureDetector(
+                  return MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
                     onTap: () => setState(
                       () => _animeId = selected ? null : anime.id,
                     ),
@@ -1249,6 +1463,7 @@ class _NewPostSheetState extends State<_NewPostSheet> {
                           Text(anime.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: Mi.caption().copyWith(fontSize: 9)),
                         ]),
                       ),
+                    ),
                     ),
                   );
                 },
@@ -1282,35 +1497,39 @@ class _NewPostSheetState extends State<_NewPostSheet> {
               ),
             ),
             const SizedBox(height: 12),
-            FilledButton(
-              onPressed: _canPost ? _submit : null,
-              style: FilledButton.styleFrom(
-                backgroundColor: Mi.accent,
-                disabledBackgroundColor: Mi.line,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+            MouseRegion(
+              cursor: _canPost ? SystemMouseCursors.click : SystemMouseCursors.basic,
+              child: FilledButton(
+                onPressed: _canPost ? _submit : null,
+                style: FilledButton.styleFrom(
+                  backgroundColor: Mi.accent,
+                  disabledBackgroundColor: Mi.line,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                 ),
+                child: _saving
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : Text(
+                        'Post',
+                        style: Mi.body(
+                          size: 15,
+                          color: _canPost ? Colors.white : Mi.sub,
+                          weight: FontWeight.w700,
+                        ),
+                      ),
               ),
-              child: _saving
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : Text(
-                      'Post',
-                      style: Mi.body(
-                        size: 15,
-                        color: _canPost ? Colors.white : Mi.sub,
-                        weight: FontWeight.w700,
-                      ),
-                    ),
             ),
           ],
+        ),
         ),
       ),
     );
