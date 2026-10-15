@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../constants/account_menu.dart';
 import '../constants/minimal_ui.dart';
 import '../services/theme_controller.dart';
+import '../services/user_data_service.dart';
 
 /// Settings: account details, password reset, about and log out.
 class SettingsScreen extends StatefulWidget {
@@ -109,8 +110,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     subtitle: 'Send a reset link to your email',
                     onTap: () => _sendPasswordReset(context),
                   ),
+                  Divider(height: 1, indent: 62, color: Mi.line),
+                  StreamBuilder<bool>(stream: UserDataService.instance.friendRequestsEnabledStream(), builder: (context, snapshot) => SwitchListTile.adaptive(
+                    secondary: const Icon(Icons.person_add_alt_1_rounded, color: Mi.violet),
+                    title: Text('Allow friend requests', style: Mi.body(weight: FontWeight.w700)),
+                    subtitle: Text('Let other anime fans add you', style: Mi.caption()),
+                    value: snapshot.data ?? true,
+                    onChanged: (value) => UserDataService.instance.setFriendRequestsEnabled(value),
+                  )),
+                  Divider(height: 1, indent: 62, color: Mi.line),
+                  StreamBuilder<bool>(stream: UserDataService.instance.tasteSharingEnabledStream(), builder: (context, snapshot) => SwitchListTile.adaptive(
+                    secondary: const Icon(Icons.favorite_outline_rounded, color: Mi.violet),
+                    title: Text('Use favorites for recommendations', style: Mi.body(weight: FontWeight.w700)),
+                    subtitle: Text('Share favorite anime IDs to find fans with similar taste', style: Mi.caption()),
+                    value: snapshot.data ?? false,
+                    onChanged: (value) => UserDataService.instance.setTasteSharingEnabled(value),
+                  )),
                 ],
               ),
+            ),
+            const SizedBox(height: 16),
+            StreamBuilder<List<Map<String, dynamic>>>(
+              stream: UserDataService.instance.blockedUsersStream(),
+              builder: (context, snapshot) {
+                final blocked = snapshot.data ?? const <Map<String, dynamic>>[];
+                if (blocked.isEmpty) return const SizedBox.shrink();
+                return Container(decoration: Mi.card(), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Padding(padding: EdgeInsets.fromLTRB(16, 14, 16, 4), child: Text('Blocked users')),
+                  for (final user in blocked) ListTile(
+                    title: Text(user['uid'] as String? ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.body()),
+                    trailing: TextButton(onPressed: () async { await UserDataService.instance.unblockUser(user['uid'] as String); }, child: const Text('Unblock')),
+                  ),
+                ]));
+              },
             ),
             const SizedBox(height: 28),
             const MiSectionHeader(title: 'App'),

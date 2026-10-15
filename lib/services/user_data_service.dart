@@ -174,6 +174,9 @@ class UserDataService {
     if (target.isEmpty || target == _user.uid) return null;
     final found = await _db.collection('publicUsers').doc(target).get();
     if (!found.exists) return null;
+    if (found.data()?['friendRequestsEnabled'] == false) return 'disabled';
+    final blockedByMe = await _doc.collection('blockedUsers').doc(target).get();
+    if (blockedByMe.exists) return 'blocked';
     final existing = await _doc.collection('friends').doc(target).get();
     if (existing.exists) return 'already';
     final name = (found.data()?['displayName'] as String?)?.trim();
@@ -214,17 +217,75 @@ class UserDataService {
 
   Future<void> rejectFriend(FriendRequest request) => _doc.collection('friendRequests').doc(request.uid).delete();
 
+  Future<void> blockUser(String uid) async {
+    if (uid.isEmpty || uid == _user.uid) return;
+    await _doc.collection('blockedUsers').doc(uid).set({'uid': uid, 'createdAt': FieldValue.serverTimestamp()});
+    await removeFriend(uid);
+    await _doc.collection('friendRequests').doc(uid).delete();
+  }
+
+  Future<void> unblockUser(String uid) => _doc.collection('blockedUsers').doc(uid).delete();
+
+  Stream<List<Map<String, dynamic>>> blockedUsersStream() => _doc.collection('blockedUsers').snapshots().map((snapshot) => snapshot.docs.map((doc) => {...doc.data(), 'uid': doc.id}).toList());
+
+  Future<void> reportUser(String uid, String reason) async {
+    final text = reason.trim();
+    if (uid.isEmpty || uid == _user.uid || text.isEmpty || text.length > 500) return;
+    await _db.collection('userReports').add({'reporterUid': _user.uid, 'reportedUid': uid, 'reason': text, 'createdAt': FieldValue.serverTimestamp(), 'status': 'new'});
+  }
+
+  Future<void> setFriendRequestsEnabled(bool enabled) async {
+    await _db.collection('publicUsers').doc(_user.uid).set({'friendRequestsEnabled': enabled}, SetOptions(merge: true));
+    await _doc.set({'friendRequestsEnabled': enabled}, SetOptions(merge: true));
+  }
+
+  Future<void> setTasteSharingEnabled(bool enabled) async {
+    final favorites = await favoriteAnimeIdsOnce();
+    await _doc.set({'tasteSharingEnabled': enabled}, SetOptions(merge: true));
+    await _db.collection('publicUsers').doc(_user.uid).set({
+      'tasteSharingEnabled': enabled,
+      'favoriteAnimeIds': enabled ? favorites.toList() : <String>[],
+    }, SetOptions(merge: true));
+  }
+
+  Stream<bool> tasteSharingEnabledStream() => _doc.snapshots().map((snapshot) => snapshot.data()?['tasteSharingEnabled'] == true);
+
+  Stream<bool> friendRequestsEnabledStream() => _doc.snapshots().map((snapshot) => snapshot.data()?['friendRequestsEnabled'] != false);
+
+  Stream<List<Map<String, dynamic>>> recommendedFriendsStream() => _db.collection('publicUsers').limit(100).snapshots().map((snapshot) {
+    final users = snapshot.docs.where((doc) => doc.id != _user.uid).map((doc) => {...doc.data(), 'uid': doc.id}).toList();
+    users.sort((a, b) => (b['displayName'] as String? ?? '').compareTo(a['displayName'] as String? ?? ''));
+    return users;
+  });
+
+  Future<Set<String>> favoriteAnimeIdsOnce() async => (await _favorites.get()).docs.map((doc) => doc.id).toSet();
+
+  Future<List<Map<String, dynamic>>> friendsWithSharedTaste() async {
+    final mine = await favoriteAnimeIdsOnce();
+    if (mine.isEmpty) return const [];
+    final users = await recommendedFriendsStream().first;
+    final friends = await friendsOnce();
+    final existing = friends.map((friend) => friend['uid']).toSet();
+    final blockedSnapshot = await _doc.collection('blockedUsers').get();
+    final blocked = blockedSnapshot.docs.map((doc) => doc.id).toSet();
+    final ranked = <Map<String, dynamic>>[];
+    for (final user in users) {
+      if (existing.contains(user['uid']) || blocked.contains(user['uid']) || user['friendRequestsEnabled'] == false) continue;
+      final taste = Set<String>.from(user['favoriteAnimeIds'] as List? ?? const []);
+      final overlap = mine.intersection(taste).length;
+      if (overlap > 0) ranked.add({...user, 'sharedAnimeCount': overlap});
+    }
+    ranked.sort((a, b) => (b['sharedAnimeCount'] as int).compareTo(a['sharedAnimeCount'] as int));
+    return ranked.take(20).toList();
+  }
+
   Stream<List<Map<String, dynamic>>> friendsStream() => _doc.collection('friends').snapshots().map((s) => s.docs.map((d) => {...d.data(), 'uid': d.id}).toList());
 
-  Stream<List<Map<String, dynamic>>> myGroupChatsStream() => _db
+  Stream<List<Map<String, dynamic>>> myGroupChatsStream() => _doc
       .collection('chats')
-      .where('members', arrayContains: _user.uid)
       .snapshots()
       .map((snapshot) {
-        final groups = snapshot.docs
-            .where((doc) => doc.data()['isGroup'] == true)
-            .map((doc) => {...doc.data(), 'chatId': doc.id})
-            .toList();
+        final groups = snapshot.docs.map((doc) => {...doc.data(), 'chatId': doc.id}).toList();
         DateTime updatedAt(Map<String, dynamic> group) {
           final value = group['updatedAt'];
           return value is Timestamp ? value.toDate() : DateTime.fromMillisecondsSinceEpoch(0);
@@ -301,11 +362,27 @@ class UserDataService {
     if ((photoBase64?.length ?? 0) > 140000) {
       throw const FormatException('group-photo-too-large');
     }
-    await _db.collection('chats').doc(chatId).update({
+    final chatRef = _db.collection('chats').doc(chatId);
+    final chat = await chatRef.get();
+    final members = List<String>.from(chat.data()?['members'] as List? ?? const []);
+    if (!chat.exists || !members.contains(_user.uid)) throw StateError('Group chat not found.');
+    await chatRef.update({
       'name': title,
       'photoBase64': photoBase64,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+    final batch = _db.batch();
+    for (final uid in members) {
+      batch.set(_db.collection('users').doc(uid).collection('chats').doc(chatId), {
+        'chatId': chatId,
+        'name': title,
+        'isGroup': true,
+        'members': members,
+        'photoBase64': photoBase64,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+    await batch.commit();
   }
 
   Future<List<Map<String, dynamic>>> groupMembersOnce(String chatId) async {
@@ -368,7 +445,7 @@ class UserDataService {
   Stream<List<Map<String, dynamic>>> chatMessagesStream(String chatId) =>
       _db.collection('chats').doc(chatId).collection('messages').orderBy('createdAt').snapshots().map((s) => s.docs.map((d) {
         final data = d.data();
-        return {...data, 'id': d.id, 'createdAt': (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now()};
+        return {...data, 'id': d.id, 'createdAt': (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(), 'watchPartyAt': (data['watchPartyAt'] as Timestamp?)?.toDate()};
       }).toList());
 
   Future<void> sendMessage(
@@ -377,6 +454,7 @@ class UserDataService {
     String? attachmentBase64,
     String? attachmentName,
     String? attachmentType,
+    Map<String, dynamic>? extra,
   }) async {
     final message = text.trim();
     if (message.isEmpty && attachmentBase64 == null) return;
@@ -404,8 +482,24 @@ class UserDataService {
       'attachmentName': attachmentName,
       'attachmentType': attachmentType,
       'createdAt': FieldValue.serverTimestamp(),
+      ...?extra,
     });
     await ref.set({'updatedAt': FieldValue.serverTimestamp(), 'lastMessage': preview}, SetOptions(merge: true));
+    if (chatData['isGroup'] == true) {
+      final batch = _db.batch();
+      for (final uid in members) {
+        batch.set(_db.collection('users').doc(uid).collection('chats').doc(chatId), {
+          'chatId': chatId,
+          'name': (chatData['name'] as String?) ?? 'Group chat',
+          'isGroup': true,
+          'members': members,
+          'photoBase64': chatData['photoBase64'],
+          'lastMessage': preview,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+      await batch.commit();
+    }
     await Future.wait(members.where((uid) => uid != _user.uid).map((uid) =>
         _createNotification(uid, {
           'type': 'message',
@@ -419,6 +513,66 @@ class UserDataService {
           'text': preview.length > 120 ? '${preview.substring(0, 120)}…' : preview,
         })));
   }
+
+  Future<void> createChatPoll(String chatId, String question, List<String> options) async {
+    final title = question.trim();
+    final choices = options.map((value) => value.trim()).where((value) => value.isNotEmpty).toList();
+    if (title.isEmpty || title.length > 180 || choices.length < 2 || choices.length > 6 || choices.any((value) => value.length > 60)) {
+      throw const FormatException('invalid-poll');
+    }
+    await sendMessage(chatId, title, extra: {
+      'kind': 'poll',
+      'pollOptions': choices,
+    });
+  }
+
+  Future<void> postWeeklyChatPrompt(String chatId) async {
+    const prompts = [
+      'Weekly anime question: Which character had the best character development lately?',
+      'Weekly anime question: What opening or ending are you not skipping right now?',
+      'Weekly anime question: Which anime world would you visit for one day?',
+      'Weekly anime question: What scene are you still thinking about?',
+      'Weekly anime question: Which series deserves another season?',
+      'Weekly anime question: Who is your favorite supporting character?',
+      'Weekly anime question: What should the group watch together next?',
+    ];
+    final prompt = prompts[DateTime.now().weekday - 1];
+    await sendMessage(chatId, prompt, extra: {'kind': 'weeklyPrompt'});
+  }
+
+  Future<void> createWatchParty(String chatId, String title, DateTime startsAt) async {
+    final name = title.trim();
+    if (name.isEmpty || name.length > 100 || startsAt.isBefore(DateTime.now())) throw const FormatException('invalid-watch-party');
+    await sendMessage(chatId, name, extra: {'kind': 'watchParty', 'watchPartyAt': Timestamp.fromDate(startsAt)});
+  }
+
+  Future<void> voteChatPoll(String chatId, String messageId, int optionIndex) async {
+    await _db.collection('chats').doc(chatId).collection('messages').doc(messageId)
+        .collection('pollVotes').doc(_user.uid).set({
+          'uid': _user.uid,
+          'optionIndex': optionIndex,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+  }
+
+  Stream<List<Map<String, dynamic>>> chatPollVotesStream(String chatId, String messageId) =>
+      _db.collection('chats').doc(chatId).collection('messages').doc(messageId)
+          .collection('pollVotes').snapshots().map((snapshot) => snapshot.docs.map((doc) => doc.data()).toList());
+
+  Future<void> toggleMessageReaction(String chatId, String messageId, String emoji) async {
+    final ref = _db.collection('chats').doc(chatId).collection('messages').doc(messageId)
+        .collection('reactions').doc('${emoji}_${_user.uid}');
+    final existing = await ref.get();
+    if (existing.exists) {
+      await ref.delete();
+    } else {
+      await ref.set({'uid': _user.uid, 'emoji': emoji, 'createdAt': FieldValue.serverTimestamp()});
+    }
+  }
+
+  Stream<List<Map<String, dynamic>>> messageReactionsStream(String chatId, String messageId) =>
+      _db.collection('chats').doc(chatId).collection('messages').doc(messageId)
+          .collection('reactions').snapshots().map((snapshot) => snapshot.docs.map((doc) => doc.data()).toList());
 
   Future<void> addComment(UserPost post, String text) async {
     final comment = text.trim();
@@ -623,12 +777,14 @@ class UserDataService {
       .map((snapshot) => snapshot.docs.map((doc) => doc.id).toSet())
       .asBroadcastStream();
 
-  Future<void> setFavorite(String animeId, bool value) {
+  Future<void> setFavorite(String animeId, bool value) async {
     final ref = _favorites.doc(animeId);
-    if (value) {
-      return ref.set({'addedAt': FieldValue.serverTimestamp()});
+    if (value) { await ref.set({'addedAt': FieldValue.serverTimestamp()}); }
+    else { await ref.delete(); }
+    final profile = await _doc.get();
+    if (profile.data()?['tasteSharingEnabled'] == true) {
+      await _db.collection('publicUsers').doc(_user.uid).set({'favoriteAnimeIds': value ? FieldValue.arrayUnion([animeId]) : FieldValue.arrayRemove([animeId])}, SetOptions(merge: true));
     }
-    return ref.delete();
   }
 
   // ------------------------------------------------------------------ posts

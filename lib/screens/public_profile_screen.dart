@@ -11,7 +11,18 @@ class PublicProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
         backgroundColor: Mi.bg,
-        appBar: AppBar(title: const Text('Profile'), backgroundColor: Mi.bg),
+        appBar: AppBar(
+          title: const Text('Profile'), backgroundColor: Mi.bg,
+          actions: [PopupMenuButton<String>(onSelected: (action) async {
+            if (action == 'block') {
+              final ok = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(title: const Text('Block this user?'), content: const Text('They will be removed from friends and cannot send a friend request.'), actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Block'))]));
+              if (ok == true) { try { await UserDataService.instance.blockUser(uid); if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('User blocked.'))); } catch (_) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not block this user.'))); } }
+            } else if (action == 'report') {
+              final reason = await showDialog<String>(context: context, builder: (dialogContext) { final controller = TextEditingController(); return AlertDialog(title: const Text('Report user'), content: TextField(controller: controller, maxLength: 500, maxLines: 3, decoration: const InputDecoration(hintText: 'Tell us what happened')), actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, controller.text), child: const Text('Submit'))]); });
+              if (reason != null && reason.trim().isNotEmpty) { try { await UserDataService.instance.reportUser(uid, reason); if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report sent.'))); } catch (_) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not submit report.'))); } }
+            }
+          }, itemBuilder: (_) => const [PopupMenuItem(value: 'report', child: ListTile(dense: true, leading: Icon(Icons.flag_outlined), title: Text('Report'))), PopupMenuItem(value: 'block', child: ListTile(dense: true, leading: Icon(Icons.block_rounded), title: Text('Block')))])],
+        ),
         body: MiBackdrop(
           child: SafeArea(
             child: StreamBuilder<UserProfile?>(

@@ -9,6 +9,8 @@ import '../constants/minimal_ui.dart';
 import '../constants/app_motion.dart';
 import '../services/user_data_service.dart';
 import '../services/theme_controller.dart';
+import '../services/anime_catalog_service.dart';
+import '../data/anime_catalog.dart';
 import 'public_profile_screen.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -84,7 +86,10 @@ class _ChatScreenState extends State<ChatScreen> {
         friends: [
           for (final friend in friends)
             if (draft.friendUids.contains(friend['uid']))
-              {'uid': '${friend['uid']}', 'name': '${friend['name'] ?? 'Friend'}'},
+              {
+                'uid': '${friend['uid']}',
+                'name': '${friend['name'] ?? 'Friend'}',
+              },
         ],
       );
       if (mounted) miSnack(context, 'Group created.');
@@ -95,108 +100,158 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        backgroundColor: Mi.bg,
-        body: MiBackdrop(
-          child: SafeArea(
-            bottom: false,
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+    backgroundColor: Mi.bg,
+    body: MiBackdrop(
+      child: SafeArea(
+        bottom: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+          children: [
+            Row(
               children: [
-                Row(children: [
-                  Expanded(child: Text('Chat with friends', style: Mi.title())),
-                  IconButton.filledTonal(
-                    tooltip: 'Create group chat',
-                    onPressed: _createGroup,
-                    icon: const Icon(Icons.group_add_rounded),
-                  ),
-                ]),
-                const SizedBox(height: 6),
-                Text('Open Profile to add friends or manage requests.', style: Mi.caption()),
-                const SizedBox(height: 24),
-                const MiSectionHeader(title: 'Friends'),
-                const SizedBox(height: 8),
-                StreamBuilder<List<Map<String, dynamic>>>(
-                  stream: _friends,
-                  builder: (context, snap) {
-                    final friends = snap.data ?? const <Map<String, dynamic>>[];
-                    if (friends.isEmpty) return Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: Text('Your chats will appear here.', style: Mi.caption()));
-                    return Column(children: [
-                      for (final friend in friends)
-                        Card(
-                          color: Mi.surface,
-                          child: ListTile(
-                            leading: MouseRegion(
-                              cursor: SystemMouseCursors.click,
-                              child: GestureDetector(
-                                onTap: () => Navigator.push(
-                                  context,
-                                  AppMotion.route(
-                                    builder: (_) => PublicProfileScreen(
-                                      uid: (friend['uid'] as String?) ?? '',
-                                    ),
-                                  ),
-                                ),
-                                child: FriendAvatar(
-                                  uid: (friend['uid'] as String?) ?? '',
-                                  name: (friend['name'] as String?) ?? 'Friend',
-                                  size: 42,
-                                ),
-                              ),
-                            ),
-                            title: Text((friend['name'] as String?) ?? 'Friend', style: Mi.body()),
-                            subtitle: Text((friend['uid'] as String?) ?? '', style: Mi.caption()),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () {
-                              final chatId = friend['chatId'] as String?;
-                              if (chatId == null) return;
-                              Navigator.push(context, AppMotion.route(builder: (_) => _ConversationScreen(chatId: chatId, title: (friend['name'] as String?) ?? 'Chat')));
-                            },
-                          ),
-                        ),
-                    ]);
-                  },
-                ),
-                const SizedBox(height: 22),
-                const MiSectionHeader(title: 'Group chats'),
-                const SizedBox(height: 8),
-                StreamBuilder<List<Map<String, dynamic>>>(
-                  stream: _groups,
-                  builder: (context, snap) {
-                    if (snap.hasError) return const MiDataError();
-                    if (!snap.hasData) return const MiLoading();
-                    final groups = snap.data!;
-                    if (groups.isEmpty) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        child: Text('Create a group and add your friends here.', style: Mi.caption()),
-                      );
-                    }
-                    return Column(children: [
-                      for (final group in groups)
-                        Card(
-                          color: Mi.surface,
-                          child: ListTile(
-                            leading: _groupAvatar(group['photoBase64'] as String?),
-                            title: Text((group['name'] as String?) ?? 'Group chat', style: Mi.body(weight: FontWeight.w700)),
-                            subtitle: Text('${(group['members'] as List? ?? const []).length} members', style: Mi.caption()),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => Navigator.push(context, AppMotion.route(builder: (_) => _ConversationScreen(
-                              chatId: group['chatId'] as String,
-                              title: (group['name'] as String?) ?? 'Group chat',
-                              isGroup: true,
-                              members: List<String>.from(group['members'] as List? ?? const []),
-                              groupPhotoBase64: group['photoBase64'] as String?,
-                            ))),
-                          ),
-                        ),
-                    ]);
-                  },
+                Expanded(child: Text('Chat with friends', style: Mi.title())),
+                IconButton.filledTonal(
+                  tooltip: 'Create group chat',
+                  onPressed: _createGroup,
+                  icon: const Icon(Icons.group_add_rounded),
                 ),
               ],
             ),
-          ),
+            const SizedBox(height: 6),
+            Text(
+              'Open Profile to add friends or manage requests.',
+              style: Mi.caption(),
+            ),
+            const SizedBox(height: 24),
+            const MiSectionHeader(title: 'Friends'),
+            const SizedBox(height: 8),
+            StreamBuilder<List<Map<String, dynamic>>>(
+              stream: _friends,
+              builder: (context, snap) {
+                final friends = snap.data ?? const <Map<String, dynamic>>[];
+                if (friends.isEmpty)
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Text(
+                      'Your chats will appear here.',
+                      style: Mi.caption(),
+                    ),
+                  );
+                return Column(
+                  children: [
+                    for (final friend in friends)
+                      Card(
+                        color: Mi.surface,
+                        child: ListTile(
+                          leading: MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            child: GestureDetector(
+                              onTap: () => Navigator.push(
+                                context,
+                                AppMotion.route(
+                                  builder: (_) => PublicProfileScreen(
+                                    uid: (friend['uid'] as String?) ?? '',
+                                  ),
+                                ),
+                              ),
+                              child: FriendAvatar(
+                                uid: (friend['uid'] as String?) ?? '',
+                                name: (friend['name'] as String?) ?? 'Friend',
+                                size: 42,
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            (friend['name'] as String?) ?? 'Friend',
+                            style: Mi.body(),
+                          ),
+                          subtitle: Text(
+                            (friend['uid'] as String?) ?? '',
+                            style: Mi.caption(),
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () {
+                            final chatId = friend['chatId'] as String?;
+                            if (chatId == null) return;
+                            Navigator.push(
+                              context,
+                              AppMotion.route(
+                                builder: (_) => _ConversationScreen(
+                                  chatId: chatId,
+                                  title: (friend['name'] as String?) ?? 'Chat',
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 22),
+            const MiSectionHeader(title: 'Group chats'),
+            const SizedBox(height: 8),
+            StreamBuilder<List<Map<String, dynamic>>>(
+              stream: _groups,
+              builder: (context, snap) {
+                if (snap.hasError) return const MiDataError();
+                if (!snap.hasData) return const MiLoading();
+                final groups = snap.data!;
+                if (groups.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Text(
+                      'Create a group and add your friends here.',
+                      style: Mi.caption(),
+                    ),
+                  );
+                }
+                return Column(
+                  children: [
+                    for (final group in groups)
+                      Card(
+                        color: Mi.surface,
+                        child: ListTile(
+                          leading: _groupAvatar(
+                            group['photoBase64'] as String?,
+                          ),
+                          title: Text(
+                            (group['name'] as String?) ?? 'Group chat',
+                            style: Mi.body(weight: FontWeight.w700),
+                          ),
+                          subtitle: Text(
+                            '${(group['members'] as List? ?? const []).length} members',
+                            style: Mi.caption(),
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.push(
+                            context,
+                            AppMotion.route(
+                              builder: (_) => _ConversationScreen(
+                                chatId: group['chatId'] as String,
+                                title:
+                                    (group['name'] as String?) ?? 'Group chat',
+                                isGroup: true,
+                                members: List<String>.from(
+                                  group['members'] as List? ?? const [],
+                                ),
+                                groupPhotoBase64:
+                                    group['photoBase64'] as String?,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ],
         ),
-      );
+      ),
+    ),
+  );
 }
 
 Widget _groupAvatar(String? photoBase64) {
@@ -211,7 +266,9 @@ Widget _groupAvatar(String? photoBase64) {
   return CircleAvatar(
     backgroundColor: Mi.tint,
     backgroundImage: photo == null ? null : MemoryImage(photo),
-    child: photo == null ? const Icon(Icons.groups_rounded, color: Mi.violet) : null,
+    child: photo == null
+        ? const Icon(Icons.groups_rounded, color: Mi.violet)
+        : null,
   );
 }
 
@@ -235,49 +292,72 @@ class _GroupMembersSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(context).height * .68,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Members', style: Mi.title(size: 20)),
-                  const SizedBox(height: 3),
-                  Text('$groupName · ${members.length} members', style: Mi.caption()),
-                ]),
-              ),
-              Divider(height: 1, color: Mi.line),
-              Expanded(
-                child: ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(14, 8, 14, 18),
-                  itemCount: members.length,
-                  separatorBuilder: (_, _) => Divider(height: 1, indent: 60, color: Mi.line),
-                  itemBuilder: (context, index) {
-                    final member = members[index];
-                    final uid = member['uid'] as String? ?? '';
-                    final name = member['name'] as String? ?? 'Anime Fan';
-                    final isOwner = member['isOwner'] == true;
-                    final isMe = uid == UserDataService.instance.currentUid;
-                    final badges = <String>[
-                      if (isMe) 'You',
-                      if (isOwner) 'Group admin',
-                    ];
-                    return ListTile(
-                      leading: FriendAvatar(uid: uid, name: name, size: 42),
-                      title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.body(weight: FontWeight.w700)),
-                      subtitle: Text(badges.isEmpty ? uid : badges.join(' · '), maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.caption()),
-                      trailing: Icon(Icons.chevron_right_rounded, color: Mi.sub),
-                      onTap: uid.isEmpty ? null : () => Navigator.of(context).push(AppMotion.route(builder: (_) => PublicProfileScreen(uid: uid))),
-                    );
-                  },
+    child: SizedBox(
+      height: MediaQuery.sizeOf(context).height * .68,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Members', style: Mi.title(size: 20)),
+                const SizedBox(height: 3),
+                Text(
+                  '$groupName · ${members.length} members',
+                  style: Mi.caption(),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      );
+          Divider(height: 1, color: Mi.line),
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 18),
+              itemCount: members.length,
+              separatorBuilder: (_, _) =>
+                  Divider(height: 1, indent: 60, color: Mi.line),
+              itemBuilder: (context, index) {
+                final member = members[index];
+                final uid = member['uid'] as String? ?? '';
+                final name = member['name'] as String? ?? 'Anime Fan';
+                final isOwner = member['isOwner'] == true;
+                final isMe = uid == UserDataService.instance.currentUid;
+                final badges = <String>[
+                  if (isMe) 'You',
+                  if (isOwner) 'Group admin',
+                ];
+                return ListTile(
+                  leading: FriendAvatar(uid: uid, name: name, size: 42),
+                  title: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Mi.body(weight: FontWeight.w700),
+                  ),
+                  subtitle: Text(
+                    badges.isEmpty ? uid : badges.join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Mi.caption(),
+                  ),
+                  trailing: Icon(Icons.chevron_right_rounded, color: Mi.sub),
+                  onTap: uid.isEmpty
+                      ? null
+                      : () => Navigator.of(context).push(
+                          AppMotion.route(
+                            builder: (_) => PublicProfileScreen(uid: uid),
+                          ),
+                        ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _GroupProfileDialog extends StatefulWidget {
@@ -303,12 +383,21 @@ class _GroupProfileDialogState extends State<_GroupProfileDialog> {
 
   Future<void> _pickPhoto() async {
     try {
-      final image = await _picker.pickImage(source: ImageSource.gallery, maxWidth: 256, maxHeight: 256, imageQuality: 68);
+      final image = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 256,
+        maxHeight: 256,
+        imageQuality: 68,
+      );
       if (image == null) return;
       final encoded = await UserDataService.instance.encodeAvatar(image);
       if (mounted) setState(() => _photoBase64 = encoded);
     } on FormatException {
-      if (mounted) miSnack(context, 'That group photo is too large. Choose another image.');
+      if (mounted)
+        miSnack(
+          context,
+          'That group photo is too large. Choose another image.',
+        );
     } catch (_) {
       if (mounted) miSnack(context, 'Could not open the photo picker.');
     }
@@ -332,20 +421,62 @@ class _GroupProfileDialogState extends State<_GroupProfileDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircleAvatar(radius: 42, backgroundColor: Mi.tint, backgroundImage: image, child: image == null ? const Icon(Icons.groups_rounded, color: Mi.violet, size: 34) : null),
+            CircleAvatar(
+              radius: 42,
+              backgroundColor: Mi.tint,
+              backgroundImage: image,
+              child: image == null
+                  ? const Icon(Icons.groups_rounded, color: Mi.violet, size: 34)
+                  : null,
+            ),
             const SizedBox(height: 8),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              TextButton.icon(onPressed: _pickPhoto, icon: const Icon(Icons.photo_outlined), label: const Text('Change photo')),
-              if (_photoBase64 != null) IconButton(tooltip: 'Remove photo', onPressed: () => setState(() => _photoBase64 = null), icon: const Icon(Icons.delete_outline_rounded, color: Mi.danger)),
-            ]),
-            TextField(controller: _name, maxLength: 60, autofocus: true, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Group name', border: OutlineInputBorder())),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TextButton.icon(
+                  onPressed: _pickPhoto,
+                  icon: const Icon(Icons.photo_outlined),
+                  label: const Text('Change photo'),
+                ),
+                if (_photoBase64 != null)
+                  IconButton(
+                    tooltip: 'Remove photo',
+                    onPressed: () => setState(() => _photoBase64 = null),
+                    icon: const Icon(
+                      Icons.delete_outline_rounded,
+                      color: Mi.danger,
+                    ),
+                  ),
+              ],
+            ),
+            TextField(
+              controller: _name,
+              maxLength: 60,
+              autofocus: true,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Group name',
+                border: OutlineInputBorder(),
+              ),
+            ),
           ],
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
         FilledButton(
-          onPressed: _name.text.trim().isEmpty ? null : () => Navigator.pop(context, _GroupProfileDraft(name: _name.text.trim(), photoBase64: _photoBase64)),
+          onPressed: _name.text.trim().isEmpty
+              ? null
+              : () => Navigator.pop(
+                  context,
+                  _GroupProfileDraft(
+                    name: _name.text.trim(),
+                    photoBase64: _photoBase64,
+                  ),
+                ),
           child: const Text('Save'),
         ),
       ],
@@ -376,62 +507,102 @@ class _GroupMemberDialogState extends State<_GroupMemberDialog> {
     final name = _name.text.trim();
     if (widget.askName && name.isEmpty) return;
     if (_selected.isEmpty) return;
-    Navigator.of(context).pop(_GroupDraft(
-      name: widget.askName ? name : null,
-      friendUids: _selected.toList(),
-    ));
+    Navigator.of(context).pop(
+      _GroupDraft(
+        name: widget.askName ? name : null,
+        friendUids: _selected.toList(),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        backgroundColor: Mi.surface,
-        title: Text(widget.askName ? 'Create group chat' : 'Add friends', style: Mi.title(size: 19)),
-        content: SizedBox(
-          width: 420,
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            if (widget.askName) ...[
-              TextField(controller: _name, maxLength: 60, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Group name', border: OutlineInputBorder())),
-              const SizedBox(height: 8),
-            ],
-            Align(alignment: Alignment.centerLeft, child: Text('Choose friends', style: Mi.caption())),
-            const SizedBox(height: 6),
-            SizedBox(
-              height: 300,
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: widget.friends.length,
-                itemBuilder: (context, index) {
-                  final friend = widget.friends[index];
-                  final uid = friend['uid'] as String? ?? '';
-                  return CheckboxListTile(
-                    value: _selected.contains(uid),
-                    title: Text((friend['name'] as String?) ?? 'Friend', style: Mi.body()),
-                    subtitle: Text(uid, maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.caption()),
-                    onChanged: (checked) => setState(() {
-                      if (checked == true) {
-                        if (_selected.length < 30) _selected.add(uid);
-                      } else {
-                        _selected.remove(uid);
-                      }
-                    }),
-                  );
-                },
+    backgroundColor: Mi.surface,
+    title: Text(
+      widget.askName ? 'Create group chat' : 'Add friends',
+      style: Mi.title(size: 19),
+    ),
+    content: SizedBox(
+      width: 420,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.askName) ...[
+            TextField(
+              controller: _name,
+              maxLength: 60,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Group name',
+                border: OutlineInputBorder(),
               ),
             ),
-          ]),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: _selected.isEmpty || (widget.askName && _name.text.trim().isEmpty) ? null : _submit,
-            child: Text(widget.askName ? 'Create' : 'Add'),
+            const SizedBox(height: 8),
+          ],
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Choose friends', style: Mi.caption()),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 300,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: widget.friends.length,
+              itemBuilder: (context, index) {
+                final friend = widget.friends[index];
+                final uid = friend['uid'] as String? ?? '';
+                return CheckboxListTile(
+                  value: _selected.contains(uid),
+                  title: Text(
+                    (friend['name'] as String?) ?? 'Friend',
+                    style: Mi.body(),
+                  ),
+                  subtitle: Text(
+                    uid,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Mi.caption(),
+                  ),
+                  onChanged: (checked) => setState(() {
+                    if (checked == true) {
+                      if (_selected.length < 30) _selected.add(uid);
+                    } else {
+                      _selected.remove(uid);
+                    }
+                  }),
+                );
+              },
+            ),
           ),
         ],
-      );
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed:
+            _selected.isEmpty || (widget.askName && _name.text.trim().isEmpty)
+            ? null
+            : _submit,
+        child: Text(widget.askName ? 'Create' : 'Add'),
+      ),
+    ],
+  );
 }
 
 class _ChatTheme {
-  const _ChatTheme({required this.name, required this.background, required this.surface, required this.myBubble, required this.friendBubble, required this.accent});
+  const _ChatTheme({
+    required this.name,
+    required this.background,
+    required this.surface,
+    required this.myBubble,
+    required this.friendBubble,
+    required this.accent,
+  });
   final String name;
   final Color background;
   final Color surface;
@@ -441,13 +612,40 @@ class _ChatTheme {
 }
 
 const _chatThemes = [
-  _ChatTheme(name: 'Blossom', background: Color(0xFFFFF2F8), surface: Color(0xFFFFFAFC), myBubble: LinearGradient(colors: [Color(0xFFFF77AA), Color(0xFF9D75FF)]), friendBubble: Colors.white, accent: Color(0xFFFF5C9D)),
-  _ChatTheme(name: 'Ocean', background: Color(0xFFEAF7FF), surface: Color(0xFFF8FCFF), myBubble: LinearGradient(colors: [Color(0xFF39B8D6), Color(0xFF5576E8)]), friendBubble: Colors.white, accent: Color(0xFF318EC8)),
-  _ChatTheme(name: 'Night sky', background: Color(0xFF22243A), surface: Color(0xFF30334F), myBubble: LinearGradient(colors: [Color(0xFF7058D8), Color(0xFFB15BBA)]), friendBubble: Color(0xFF383B59), accent: Color(0xFFB59AFF)),
+  _ChatTheme(
+    name: 'Blossom',
+    background: Color(0xFFFFF2F8),
+    surface: Color(0xFFFFFAFC),
+    myBubble: LinearGradient(colors: [Color(0xFFFF77AA), Color(0xFF9D75FF)]),
+    friendBubble: Colors.white,
+    accent: Color(0xFFFF5C9D),
+  ),
+  _ChatTheme(
+    name: 'Ocean',
+    background: Color(0xFFEAF7FF),
+    surface: Color(0xFFF8FCFF),
+    myBubble: LinearGradient(colors: [Color(0xFF39B8D6), Color(0xFF5576E8)]),
+    friendBubble: Colors.white,
+    accent: Color(0xFF318EC8),
+  ),
+  _ChatTheme(
+    name: 'Night sky',
+    background: Color(0xFF22243A),
+    surface: Color(0xFF30334F),
+    myBubble: LinearGradient(colors: [Color(0xFF7058D8), Color(0xFFB15BBA)]),
+    friendBubble: Color(0xFF383B59),
+    accent: Color(0xFFB59AFF),
+  ),
 ];
 
 class _ConversationScreen extends StatefulWidget {
-  const _ConversationScreen({required this.chatId, required this.title, this.isGroup = false, this.members = const [], this.groupPhotoBase64});
+  const _ConversationScreen({
+    required this.chatId,
+    required this.title,
+    this.isGroup = false,
+    this.members = const [],
+    this.groupPhotoBase64,
+  });
   final String chatId;
   final String title;
   final bool isGroup;
@@ -465,6 +663,8 @@ class _ConversationScreenState extends State<_ConversationScreen> {
   int _themeIndex = ThemeController.isDarkMode.value ? 2 : 0;
   bool _customTheme = false;
   bool _sending = false;
+  String _filterQuery = '';
+  Map<String, dynamic>? _replyingTo;
   late List<String> _members = List<String>.from(widget.members);
   late String _chatName = widget.title;
   late String? _groupPhotoBase64 = widget.groupPhotoBase64;
@@ -495,7 +695,9 @@ class _ConversationScreenState extends State<_ConversationScreen> {
     try {
       final friends = await _service.friendsOnce();
       if (!mounted) return;
-      final available = friends.where((friend) => !_members.contains(friend['uid'])).toList();
+      final available = friends
+          .where((friend) => !_members.contains(friend['uid']))
+          .toList();
       if (available.isEmpty) {
         miSnack(context, 'All your friends are already in this group.');
         return;
@@ -505,7 +707,10 @@ class _ConversationScreenState extends State<_ConversationScreen> {
         builder: (_) => _GroupMemberDialog(friends: available, askName: false),
       );
       if (draft == null || !mounted) return;
-      final members = await _service.addGroupMembers(widget.chatId, draft.friendUids);
+      final members = await _service.addGroupMembers(
+        widget.chatId,
+        draft.friendUids,
+      );
       if (mounted) {
         setState(() => _members = members);
         miSnack(context, 'Friends added to the group.');
@@ -518,7 +723,8 @@ class _ConversationScreenState extends State<_ConversationScreen> {
   Future<void> _editGroupProfile() async {
     final draft = await showDialog<_GroupProfileDraft>(
       context: context,
-      builder: (_) => _GroupProfileDialog(name: _chatName, photoBase64: _groupPhotoBase64),
+      builder: (_) =>
+          _GroupProfileDialog(name: _chatName, photoBase64: _groupPhotoBase64),
     );
     if (draft == null || !mounted) return;
     try {
@@ -534,9 +740,19 @@ class _ConversationScreenState extends State<_ConversationScreen> {
       });
       miSnack(context, 'Group profile updated.');
     } on FormatException catch (error) {
-      if (mounted) miSnack(context, error.message == 'group-photo-too-large' ? 'Choose a smaller group photo.' : 'Enter a group name.');
+      if (mounted)
+        miSnack(
+          context,
+          error.message == 'group-photo-too-large'
+              ? 'Choose a smaller group photo.'
+              : 'Enter a group name.',
+        );
     } catch (_) {
-      if (mounted) miSnack(context, 'Could not update the group profile. Check Firebase Rules and try again.');
+      if (mounted)
+        miSnack(
+          context,
+          'Could not update the group profile. Check Firebase Rules and try again.',
+        );
     }
   }
 
@@ -549,7 +765,8 @@ class _ConversationScreenState extends State<_ConversationScreen> {
         backgroundColor: Mi.surface,
         showDragHandle: true,
         isScrollControlled: true,
-        builder: (_) => _GroupMembersSheet(groupName: _chatName, members: members),
+        builder: (_) =>
+            _GroupMembersSheet(groupName: _chatName, members: members),
       );
     } catch (_) {
       if (mounted) miSnack(context, 'Could not load group members.');
@@ -569,16 +786,37 @@ class _ConversationScreenState extends State<_ConversationScreen> {
       backgroundColor: Mi.surface,
       showDragHandle: true,
       builder: (sheetContext) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Padding(padding: const EdgeInsets.all(16), child: Text('Chat theme', style: Mi.title(size: 20))),
-          for (var i = 0; i < _chatThemes.length; i++)
-            ListTile(
-              leading: CircleAvatar(backgroundColor: _chatThemes[i].accent, child: const Icon(Icons.chat_bubble_rounded, color: Colors.white, size: 18)),
-              title: Text(_chatThemes[i].name, style: Mi.body()),
-              trailing: i == _themeIndex ? Icon(Icons.check_circle, color: _chatThemes[i].accent) : null,
-              onTap: () { setState(() { _themeIndex = i; _customTheme = true; }); Navigator.pop(sheetContext); },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('Chat theme', style: Mi.title(size: 20)),
             ),
-        ]),
+            for (var i = 0; i < _chatThemes.length; i++)
+              ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: _chatThemes[i].accent,
+                  child: const Icon(
+                    Icons.chat_bubble_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+                title: Text(_chatThemes[i].name, style: Mi.body()),
+                trailing: i == _themeIndex
+                    ? Icon(Icons.check_circle, color: _chatThemes[i].accent)
+                    : null,
+                onTap: () {
+                  setState(() {
+                    _themeIndex = i;
+                    _customTheme = true;
+                  });
+                  Navigator.pop(sheetContext);
+                },
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -592,7 +830,11 @@ class _ConversationScreenState extends State<_ConversationScreen> {
 
   Future<void> _pickImage() async {
     try {
-      final picked = await _imagePicker.pickImage(source: ImageSource.gallery, maxWidth: 1200, imageQuality: 65);
+      final picked = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1200,
+        imageQuality: 65,
+      );
       if (picked == null) return;
       final bytes = await picked.readAsBytes();
       await _sendAttachment(bytes, 'Photo', 'image/jpeg');
@@ -603,11 +845,15 @@ class _ConversationScreenState extends State<_ConversationScreen> {
 
   Future<void> _pickFile() async {
     try {
-      final result = await FilePicker.pickFiles(type: FileType.any, withData: true);
+      final result = await FilePicker.pickFiles(
+        type: FileType.any,
+        withData: true,
+      );
       if (result == null || result.files.isEmpty) return;
       final file = result.files.single;
       final bytes = file.bytes;
-      if (bytes == null) throw const FormatException('Could not read file bytes.');
+      if (bytes == null)
+        throw const FormatException('Could not read file bytes.');
       if (bytes.length > 480 * 1024) {
         if (mounted) miSnack(context, 'Attachments must be under 480 KB.');
         return;
@@ -627,23 +873,291 @@ class _ConversationScreenState extends State<_ConversationScreen> {
     }
   }
 
-  Future<void> _sendAttachment(Uint8List bytes, String name, String type) async {
+  Future<void> _sendAttachment(
+    Uint8List bytes,
+    String name,
+    String type,
+  ) async {
     if (bytes.length > 480 * 1024) {
       miSnack(context, 'Attachments must be under 480 KB.');
       return;
     }
-    await _send(attachmentBase64: base64Encode(bytes), attachmentName: name, attachmentType: type);
+    await _send(
+      attachmentBase64: base64Encode(bytes),
+      attachmentName: name,
+      attachmentType: type,
+    );
   }
 
-  Future<void> _send({String text = '', String? attachmentBase64, String? attachmentName, String? attachmentType}) async {
+  Future<void> _send({
+    String text = '',
+    String? attachmentBase64,
+    String? attachmentName,
+    String? attachmentType,
+  }) async {
     if (_sending) return;
     setState(() => _sending = true);
     try {
-      await _service.sendMessage(widget.chatId, text, attachmentBase64: attachmentBase64, attachmentName: attachmentName, attachmentType: attachmentType);
+      final reply = _replyingTo;
+      await _service.sendMessage(
+        widget.chatId,
+        text,
+        attachmentBase64: attachmentBase64,
+        attachmentName: attachmentName,
+        attachmentType: attachmentType,
+        extra: reply == null
+            ? null
+            : {
+                'replyToId': reply['id'],
+                'replyToName': reply['senderName'],
+                'replyToText': reply['text'],
+              },
+      );
+      if (reply != null && mounted) setState(() => _replyingTo = null);
     } catch (_) {
-      if (mounted) miSnack(context, 'Could not send message. Check the attachment size and try again.');
+      if (mounted)
+        miSnack(
+          context,
+          'Could not send message. Check the attachment size and try again.',
+        );
     }
     if (mounted) setState(() => _sending = false);
+  }
+
+  Future<void> _createPoll() async {
+    final question = TextEditingController();
+    final options = [TextEditingController(), TextEditingController()];
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Start a group poll'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: question,
+                  maxLength: 180,
+                  decoration: const InputDecoration(labelText: 'Question'),
+                ),
+                for (var i = 0; i < options.length; i++)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: options[i],
+                          maxLength: 60,
+                          decoration: InputDecoration(
+                            labelText: 'Option ${i + 1}',
+                          ),
+                        ),
+                      ),
+                      if (i > 1)
+                        IconButton(
+                          onPressed: () => setDialogState(() {
+                            options.removeAt(i).dispose();
+                          }),
+                          icon: const Icon(Icons.close),
+                        ),
+                    ],
+                  ),
+                if (options.length < 6)
+                  TextButton.icon(
+                    onPressed: () => setDialogState(
+                      () => options.add(TextEditingController()),
+                    ),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add option'),
+                  ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Ideas: best character this season, opening song, or next watch party pick.',
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Post poll'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      try {
+        await _service.createChatPoll(
+          widget.chatId,
+          question.text,
+          options.map((e) => e.text).toList(),
+        );
+      } catch (_) {
+        if (mounted)
+          miSnack(context, 'Add a question and at least two options.');
+      }
+    }
+    question.dispose();
+    for (final option in options) {
+      option.dispose();
+    }
+  }
+
+  Future<void> _createWatchParty() async {
+    final title = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Plan a watch party'),
+        content: TextField(
+          controller: title,
+          maxLength: 100,
+          decoration: const InputDecoration(labelText: 'Anime or event'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, title.text),
+            child: const Text('Choose time'),
+          ),
+        ],
+      ),
+    );
+    title.dispose();
+    if (name == null || name.trim().isEmpty || !mounted) return;
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: DateTime(now.year + 2, now.month, now.day),
+      initialDate: now,
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
+    );
+    if (time == null) return;
+    try {
+      await _service.createWatchParty(
+        widget.chatId,
+        name,
+        DateTime(date.year, date.month, date.day, time.hour, time.minute),
+      );
+    } catch (_) {
+      if (mounted) miSnack(context, 'Choose a future time and try again.');
+    }
+  }
+
+  Future<void> _shareAnime() async {
+    try {
+      final anime = await AnimeCatalogService.instance.topAnime();
+      if (!mounted) return;
+      final selected = await showModalBottomSheet<Anime>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) => SafeArea(
+          child: SizedBox(
+            height: MediaQuery.sizeOf(context).height * .72,
+            child: ListView(
+              children: [
+                const ListTile(title: Text('Share an anime')),
+                for (final item in anime)
+                  ListTile(
+                    leading: item.imageUrl.isEmpty
+                        ? const Icon(Icons.movie_outlined)
+                        : Image.network(
+                            item.imageUrl,
+                            width: 42,
+                            fit: BoxFit.cover,
+                          ),
+                    title: Text(
+                      item.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      item.genreLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onTap: () => Navigator.pop(context, item),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+      if (selected != null)
+        await _service.sendMessage(
+          widget.chatId,
+          selected.title,
+          extra: {
+            'kind': 'anime',
+            'animeId': selected.id,
+            'animeTitle': selected.title,
+            'animeImageUrl': selected.imageUrl,
+          },
+        );
+    } catch (_) {
+      if (mounted) miSnack(context, 'Could not load anime right now.');
+    }
+  }
+
+  Future<void> _messageActions(Map<String, dynamic> message) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            const ListTile(title: Text('Message actions')),
+            ListTile(
+              leading: const Icon(Icons.reply_rounded),
+              title: const Text('Reply'),
+              onTap: () => Navigator.pop(context, 'reply'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.emoji_emotions_outlined),
+              title: const Text('React'),
+              onTap: () => Navigator.pop(context, 'react'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == 'reply' && mounted) setState(() => _replyingTo = message);
+    if (action == 'react' && mounted) {
+      final emoji = await showModalBottomSheet<String>(
+        context: context,
+        builder: (context) => SafeArea(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: ['❤️', '😂', '🔥', '👏', '😮']
+                .map(
+                  (e) => TextButton(
+                    onPressed: () => Navigator.pop(context, e),
+                    child: Text(e, style: const TextStyle(fontSize: 26)),
+                  ),
+                )
+                .toList(),
+          ),
+        ),
+      );
+      if (emoji != null)
+        await _service.toggleMessageReaction(
+          widget.chatId,
+          message['id'] as String,
+          emoji,
+        );
+    }
   }
 
   @override
@@ -655,47 +1169,355 @@ class _ConversationScreenState extends State<_ConversationScreen> {
       appBar: AppBar(
         backgroundColor: _theme.surface,
         foregroundColor: dark ? Colors.white : Mi.text,
-        title: Row(children: [
-          Container(padding: const EdgeInsets.all(2), decoration: BoxDecoration(shape: BoxShape.circle, gradient: _theme.myBubble), child: CircleAvatar(backgroundColor: Colors.white, backgroundImage: groupPhoto, child: groupPhoto == null ? Icon(widget.isGroup ? Icons.groups_rounded : Icons.person_rounded, color: Mi.violet) : null)),
-          const SizedBox(width: 10),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(_chatName, maxLines: 1, overflow: TextOverflow.ellipsis, style: Mi.body(color: dark ? Colors.white : Mi.text, weight: FontWeight.w700)), Text(widget.isGroup ? 'Group · ${_members.length} members' : 'Private chat', style: Mi.caption())])),
-        ]),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: _theme.myBubble,
+              ),
+              child: CircleAvatar(
+                backgroundColor: Colors.white,
+                backgroundImage: groupPhoto,
+                child: groupPhoto == null
+                    ? Icon(
+                        widget.isGroup
+                            ? Icons.groups_rounded
+                            : Icons.person_rounded,
+                        color: Mi.violet,
+                      )
+                    : null,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _chatName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Mi.body(
+                      color: dark ? Colors.white : Mi.text,
+                      weight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    widget.isGroup
+                        ? 'Group · ${_members.length} members'
+                        : 'Private chat',
+                    style: Mi.caption(),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
         actions: [
-          if (widget.isGroup) IconButton(tooltip: 'Edit group profile', onPressed: _editGroupProfile, icon: Icon(Icons.edit_rounded, color: _theme.accent)),
-          if (widget.isGroup) IconButton(tooltip: 'View group members', onPressed: _showGroupMembers, icon: Icon(Icons.groups_2_outlined, color: _theme.accent)),
-          if (widget.isGroup) IconButton(tooltip: 'Add friends', onPressed: _addGroupMembers, icon: Icon(Icons.person_add_alt_1_rounded, color: _theme.accent)),
-          IconButton(tooltip: 'Choose theme', onPressed: _chooseTheme, icon: Icon(Icons.palette_outlined, color: _theme.accent)),
+          PopupMenuButton<String>(
+            icon: Icon(Icons.add_circle_outline, color: _theme.accent),
+            onSelected: (value) {
+              if (value == 'poll') _createPoll();
+              if (value == 'anime') _shareAnime();
+              if (value == 'prompt')
+                _service.postWeeklyChatPrompt(widget.chatId);
+              if (value == 'watch') _createWatchParty();
+              if (value == 'search') {
+                showDialog<void>(
+                  context: context,
+                  builder: (dialogContext) => AlertDialog(
+                    title: const Text('Search messages'),
+                    content: TextField(
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        hintText: 'Type to filter this chat',
+                      ),
+                      onChanged: (value) => setState(
+                        () => _filterQuery = value.trim().toLowerCase(),
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () {
+                          setState(() => _filterQuery = '');
+                          Navigator.pop(dialogContext);
+                        },
+                        child: const Text('Done'),
+                      ),
+                    ],
+                  ),
+                );
+              }
+            },
+            itemBuilder: (_) => [
+              if (widget.isGroup)
+                const PopupMenuItem(
+                  value: 'poll',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.poll_outlined),
+                    title: Text('Create poll'),
+                  ),
+                ),
+              if (widget.isGroup)
+                const PopupMenuItem(
+                  value: 'prompt',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.help_outline),
+                    title: Text('Post weekly question'),
+                  ),
+                ),
+              if (widget.isGroup)
+                const PopupMenuItem(
+                  value: 'watch',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.live_tv_outlined),
+                    title: Text('Plan watch party'),
+                  ),
+                ),
+              const PopupMenuItem(
+                value: 'anime',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.movie_outlined),
+                  title: Text('Share anime'),
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'search',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.search),
+                  title: Text('Search messages'),
+                ),
+              ),
+            ],
+          ),
+          if (widget.isGroup)
+            IconButton(
+              tooltip: 'Edit group profile',
+              onPressed: _editGroupProfile,
+              icon: Icon(Icons.edit_rounded, color: _theme.accent),
+            ),
+          if (widget.isGroup)
+            IconButton(
+              tooltip: 'View group members',
+              onPressed: _showGroupMembers,
+              icon: Icon(Icons.groups_2_outlined, color: _theme.accent),
+            ),
+          if (widget.isGroup)
+            IconButton(
+              tooltip: 'Add friends',
+              onPressed: _addGroupMembers,
+              icon: Icon(Icons.person_add_alt_1_rounded, color: _theme.accent),
+            ),
+          IconButton(
+            tooltip: 'Choose theme',
+            onPressed: _chooseTheme,
+            icon: Icon(Icons.palette_outlined, color: _theme.accent),
+          ),
         ],
       ),
       body: DecoratedBox(
-        decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [_theme.background, _theme.surface, _theme.background])),
-        child: Column(children: [
-          Expanded(child: StreamBuilder<List<Map<String, dynamic>>>(
-            stream: _messages,
-            builder: (context, snap) {
-              if (snap.hasError) return Center(child: Text('Could not load messages.', style: Mi.body(color: dark ? Colors.white70 : Mi.sub)));
-              if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-              final messages = snap.data!;
-              if (messages.isEmpty) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.waving_hand_rounded, size: 34, color: _theme.accent), const SizedBox(height: 8), Text('Say hello to $_chatName!', style: Mi.body(color: dark ? Colors.white70 : Mi.sub))]));
-              return ListView.builder(
-                padding: const EdgeInsets.fromLTRB(14, 20, 14, 18),
-                itemCount: messages.length,
-                itemBuilder: (context, index) => _messageBubble(messages[index], dark),
-              );
-            },
-          )),
-          SafeArea(top: false, child: Container(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-            decoration: BoxDecoration(color: _theme.surface, boxShadow: const [BoxShadow(color: Color(0x18000000), blurRadius: 12, offset: Offset(0, -3))]),
-            child: Row(children: [
-              IconButton(tooltip: 'Attach a file', onPressed: _sending ? null : _pickFile, icon: Icon(Icons.attach_file_rounded, color: _theme.accent)),
-              IconButton(tooltip: 'Attach a photo', onPressed: _sending ? null : _pickImage, icon: Icon(Icons.image_outlined, color: _theme.accent)),
-              Expanded(child: TextField(controller: _text, minLines: 1, maxLines: 4, textInputAction: TextInputAction.send, onSubmitted: (_) => _sendText(), style: Mi.body(color: dark ? Colors.white : Mi.text), decoration: InputDecoration(hintText: 'Write a message...', filled: true, fillColor: _theme.background, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11), border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: BorderSide.none)))),
-              const SizedBox(width: 5),
-              IconButton.filled(onPressed: _sending ? null : _sendText, style: IconButton.styleFrom(backgroundColor: _theme.accent, foregroundColor: Colors.white), icon: _sending ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.send_rounded)),
-            ]),
-          )),
-        ]),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [_theme.background, _theme.surface, _theme.background],
+          ),
+        ),
+        child: Column(
+          children: [
+            if (_filterQuery.isNotEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                color: _theme.surface,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Searching: "$_filterQuery"',
+                        style: Mi.caption(),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => setState(() => _filterQuery = ''),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+            Expanded(
+              child: StreamBuilder<List<Map<String, dynamic>>>(
+                stream: _messages,
+                builder: (context, snap) {
+                  if (snap.hasError)
+                    return Center(
+                      child: Text(
+                        'Could not load messages.',
+                        style: Mi.body(color: dark ? Colors.white70 : Mi.sub),
+                      ),
+                    );
+                  if (!snap.hasData)
+                    return const Center(child: CircularProgressIndicator());
+                  final messages = snap.data!
+                      .where(
+                        (message) =>
+                            _filterQuery.isEmpty ||
+                            '${message['text'] ?? ''} ${message['animeTitle'] ?? ''}'
+                                .toLowerCase()
+                                .contains(_filterQuery),
+                      )
+                      .toList();
+                  if (messages.isEmpty)
+                    return Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _filterQuery.isEmpty
+                                ? Icons.waving_hand_rounded
+                                : Icons.search_off_rounded,
+                            size: 34,
+                            color: _theme.accent,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _filterQuery.isEmpty
+                                ? 'Say hello to $_chatName!'
+                                : 'No messages match this search.',
+                            style: Mi.body(
+                              color: dark ? Colors.white70 : Mi.sub,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  return ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(14, 20, 14, 18),
+                    itemCount: messages.length,
+                    itemBuilder: (context, index) =>
+                        _messageBubble(messages[index], dark),
+                  );
+                },
+              ),
+            ),
+            SafeArea(
+              top: false,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+                decoration: BoxDecoration(
+                  color: _theme.surface,
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x18000000),
+                      blurRadius: 12,
+                      offset: Offset(0, -3),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_replyingTo != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.reply, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Replying to ${_replyingTo!['senderName'] ?? 'message'} · ${_replyingTo!['text'] ?? ''}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () =>
+                                  setState(() => _replyingTo = null),
+                              icon: const Icon(Icons.close, size: 18),
+                            ),
+                          ],
+                        ),
+                      ),
+                    Row(
+                      children: [
+                        IconButton(
+                          tooltip: 'Attach a file',
+                          onPressed: _sending ? null : _pickFile,
+                          icon: Icon(
+                            Icons.attach_file_rounded,
+                            color: _theme.accent,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Attach a photo',
+                          onPressed: _sending ? null : _pickImage,
+                          icon: Icon(
+                            Icons.image_outlined,
+                            color: _theme.accent,
+                          ),
+                        ),
+                        Expanded(
+                          child: TextField(
+                            controller: _text,
+                            minLines: 1,
+                            maxLines: 4,
+                            textInputAction: TextInputAction.send,
+                            onSubmitted: (_) => _sendText(),
+                            style: Mi.body(
+                              color: dark ? Colors.white : Mi.text,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'Write a message...',
+                              filled: true,
+                              fillColor: _theme.background,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 11,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(22),
+                                borderSide: BorderSide.none,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        IconButton.filled(
+                          onPressed: _sending ? null : _sendText,
+                          style: IconButton.styleFrom(
+                            backgroundColor: _theme.accent,
+                            foregroundColor: Colors.white,
+                          ),
+                          icon: _sending
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.send_rounded),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -703,11 +1525,14 @@ class _ConversationScreenState extends State<_ConversationScreen> {
   Widget _messageBubble(Map<String, dynamic> message, bool dark) {
     final mine = message['uid'] == _service.currentUid;
     final senderUid = message['uid'] as String? ?? '';
-    final storedName = (message['senderName'] as String?)?.trim().isNotEmpty == true
+    final storedName =
+        (message['senderName'] as String?)?.trim().isNotEmpty == true
         ? (message['senderName'] as String).trim()
         : (message['fromName'] as String?)?.trim().isNotEmpty == true
-            ? (message['fromName'] as String).trim()
-            : widget.isGroup ? 'Friend' : widget.title;
+        ? (message['fromName'] as String).trim()
+        : widget.isGroup
+        ? 'Friend'
+        : widget.title;
     final senderProfile = UserProfile(
       displayName: storedName,
       email: '',
@@ -722,57 +1547,348 @@ class _ConversationScreenState extends State<_ConversationScreen> {
     final name = (message['attachmentName'] as String?) ?? 'Attachment';
     final type = (message['attachmentType'] as String?) ?? '';
     final sentAt = message['createdAt'] as DateTime?;
-    final time = sentAt == null ? '' : '${sentAt.hour.toString().padLeft(2, '0')}:${sentAt.minute.toString().padLeft(2, '0')}';
+    final time = sentAt == null
+        ? ''
+        : '${sentAt.hour.toString().padLeft(2, '0')}:${sentAt.minute.toString().padLeft(2, '0')}';
     final bubble = Container(
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * (mine ? .78 : .68)),
-        margin: EdgeInsets.only(bottom: mine ? 10 : 0),
-        padding: const EdgeInsets.all(11),
-        decoration: BoxDecoration(color: mine ? null : _theme.friendBubble, gradient: mine ? _theme.myBubble : null, borderRadius: BorderRadius.only(topLeft: const Radius.circular(18), topRight: const Radius.circular(18), bottomLeft: Radius.circular(mine ? 18 : 5), bottomRight: Radius.circular(mine ? 5 : 18)), boxShadow: const [BoxShadow(color: Color(0x12000000), blurRadius: 8, offset: Offset(0, 3))]),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.sizeOf(context).width * (mine ? .78 : .68),
+      ),
+      margin: EdgeInsets.only(bottom: mine ? 10 : 0),
+      padding: const EdgeInsets.all(11),
+      decoration: BoxDecoration(
+        color: mine ? null : _theme.friendBubble,
+        gradient: mine ? _theme.myBubble : null,
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(18),
+          topRight: const Radius.circular(18),
+          bottomLeft: Radius.circular(mine ? 18 : 5),
+          bottomRight: Radius.circular(mine ? 5 : 18),
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x12000000),
+            blurRadius: 8,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           if (data != null && type.startsWith('image/')) ...[
-            ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.memory(base64Decode(data), width: 220, fit: BoxFit.cover, errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined))),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.memory(
+                base64Decode(data),
+                width: 220,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) =>
+                    const Icon(Icons.broken_image_outlined),
+              ),
+            ),
             if (name != 'Photo') const SizedBox(height: 5),
           ] else if (data != null) ...[
-            InkWell(onTap: () => _saveAttachment(name, base64Decode(data)), borderRadius: BorderRadius.circular(10), child: Container(width: 220, padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: mine ? Colors.white.withValues(alpha: .2) : dark ? Colors.white.withValues(alpha: .1) : Mi.tint, borderRadius: BorderRadius.circular(10)), child: Row(children: [Icon(Icons.insert_drive_file_outlined, color: mine || dark ? Colors.white : _theme.accent), const SizedBox(width: 8), Expanded(child: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis, style: Mi.body(color: mine || dark ? Colors.white : Mi.text, size: 12))), Icon(Icons.download_rounded, color: mine || dark ? Colors.white : _theme.accent, size: 18)]))),
-            if (text.isNotEmpty) const SizedBox(height: 6),
-          ],
-          if (text.isNotEmpty) Text(text, style: Mi.body(color: mine || dark ? Colors.white : Mi.text)),
-          if (time.isNotEmpty) Align(alignment: Alignment.bottomRight, child: Padding(padding: const EdgeInsets.only(top: 4), child: Text(time, style: Mi.caption().copyWith(color: mine || dark ? Colors.white70 : Mi.sub, fontSize: 10)))),
-        ]),
-      );
-    return Align(
-      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: mine
-          ? bubble
-          : Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-                FutureBuilder<UserProfile?>(
-                  future: senderUid.isEmpty || message['senderName'] != null
-                      ? null
-                      : (_legacyProfiles[senderUid] ??= _service.publicProfileStream(senderUid).first),
-                  builder: (context, snapshot) {
-                    final profile = snapshot.data ?? senderProfile;
-                    final senderName = profile.displayName;
-                    return Row(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-                      MouseRegion(
-                        cursor: senderUid.isEmpty ? SystemMouseCursors.basic : SystemMouseCursors.click,
-                        child: GestureDetector(
-                        onTap: senderUid.isEmpty ? null : () => Navigator.of(context).push(
-                          AppMotion.route(builder: (_) => PublicProfileScreen(uid: senderUid)),
-                        ),
-                        child: Padding(padding: const EdgeInsets.only(right: 8, bottom: 10), child: UserAvatar(profile: profile, size: 32)),
+            InkWell(
+              onTap: () => _saveAttachment(name, base64Decode(data)),
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                width: 220,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: mine
+                      ? Colors.white.withValues(alpha: .2)
+                      : dark
+                      ? Colors.white.withValues(alpha: .1)
+                      : Mi.tint,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.insert_drive_file_outlined,
+                      color: mine || dark ? Colors.white : _theme.accent,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Mi.body(
+                          color: mine || dark ? Colors.white : Mi.text,
+                          size: 12,
                         ),
                       ),
-                      Flexible(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Padding(padding: const EdgeInsets.only(left: 4, bottom: 4), child: Text(senderName, style: Mi.caption().copyWith(color: dark ? Colors.white70 : Mi.sub, fontWeight: FontWeight.w700))),
-                        bubble,
-                      ])),
-                    ]);
-                  },
+                    ),
+                    Icon(
+                      Icons.download_rounded,
+                      color: mine || dark ? Colors.white : _theme.accent,
+                      size: 18,
+                    ),
+                  ],
                 ),
-              ]),
+              ),
             ),
+            if (text.isNotEmpty) const SizedBox(height: 6),
+          ],
+          if (message['kind'] == 'anime') ...[
+            Row(
+              children: [
+                if ((message['animeImageUrl'] as String?)?.isNotEmpty == true)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      message['animeImageUrl'] as String,
+                      width: 58,
+                      height: 78,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) =>
+                          const Icon(Icons.movie_outlined),
+                    ),
+                  ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    (message['animeTitle'] as String?) ?? text,
+                    style: Mi.body(
+                      color: mine || dark ? Colors.white : Mi.text,
+                      weight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ] else if (message['kind'] == 'watchParty') ...[
+            Row(
+              children: [
+                Icon(
+                  Icons.live_tv_rounded,
+                  color: mine || dark ? Colors.white : _theme.accent,
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    'Watch party · $text',
+                    style: Mi.body(
+                      color: mine || dark ? Colors.white : Mi.text,
+                      weight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            Text(
+              'Starts ${((message['watchPartyAt'] as DateTime?) ?? DateTime.now()).toLocal()}',
+              style: Mi.caption().copyWith(
+                color: mine || dark ? Colors.white70 : Mi.sub,
+              ),
+            ),
+          ] else if (message['kind'] == 'poll') ...[
+            Text(
+              text,
+              style: Mi.body(
+                color: mine || dark ? Colors.white : Mi.text,
+                weight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            StreamBuilder<List<Map<String, dynamic>>>(
+              stream: _service.chatPollVotesStream(
+                widget.chatId,
+                message['id'] as String,
+              ),
+              builder: (context, snapshot) {
+                final votes = snapshot.data ?? const <Map<String, dynamic>>[];
+                final options = List<String>.from(
+                  message['pollOptions'] as List? ?? const [],
+                );
+                final mineVotes = votes.where(
+                  (vote) => vote['uid'] == _service.currentUid,
+                );
+                final myVote = mineVotes.isEmpty
+                    ? null
+                    : mineVotes.first['optionIndex'] as int?;
+                return Column(
+                  children: [
+                    for (var i = 0; i < options.length; i++)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 5),
+                        child: InkWell(
+                          onTap: () => _service.voteChatPoll(
+                            widget.chatId,
+                            message['id'] as String,
+                            i,
+                          ),
+                          child: Container(
+                            width: 220,
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: myVote == i
+                                  ? _theme.accent.withValues(alpha: .2)
+                                  : Colors.black.withValues(alpha: .08),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(options[i], style: Mi.caption()),
+                                ),
+                                Text(
+                                  '${votes.where((vote) => vote['optionIndex'] == i).length}',
+                                  style: Mi.caption(),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ] else if (text.isNotEmpty)
+            Text(
+              text,
+              style: Mi.body(color: mine || dark ? Colors.white : Mi.text),
+            ),
+          if ((message['replyToText'] as String?)?.isNotEmpty == true)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                '↪ ${message['replyToName'] ?? 'Reply'}: ${message['replyToText']}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Mi.caption().copyWith(
+                  color: mine || dark ? Colors.white70 : Mi.sub,
+                ),
+              ),
+            ),
+          if (time.isNotEmpty)
+            Align(
+              alignment: Alignment.bottomRight,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  time,
+                  style: Mi.caption().copyWith(
+                    color: mine || dark ? Colors.white70 : Mi.sub,
+                    fontSize: 10,
+                  ),
+                ),
+              ),
+            ),
+          StreamBuilder<List<Map<String, dynamic>>>(
+            stream: _service.messageReactionsStream(
+              widget.chatId,
+              message['id'] as String,
+            ),
+            builder: (context, snapshot) {
+              final reactions = snapshot.data ?? const <Map<String, dynamic>>[];
+              if (reactions.isEmpty) return const SizedBox.shrink();
+              final counts = <String, int>{};
+              for (final reaction in reactions) {
+                final emoji = reaction['emoji'] as String? ?? '';
+                counts[emoji] = (counts[emoji] ?? 0) + 1;
+              }
+              return Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Wrap(
+                  spacing: 4,
+                  children: counts.entries
+                      .map(
+                        (entry) => Text(
+                          '${entry.key} ${entry.value}',
+                          style: Mi.caption().copyWith(
+                            color: mine || dark ? Colors.white : Mi.sub,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+    return GestureDetector(
+      onLongPress: () => _messageActions(message),
+      child: Align(
+        alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+        child: mine
+            ? bubble
+            : Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FutureBuilder<UserProfile?>(
+                      future: senderUid.isEmpty || message['senderName'] != null
+                          ? null
+                          : (_legacyProfiles[senderUid] ??= _service
+                                .publicProfileStream(senderUid)
+                                .first),
+                      builder: (context, snapshot) {
+                        final profile = snapshot.data ?? senderProfile;
+                        final senderName = profile.displayName;
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            MouseRegion(
+                              cursor: senderUid.isEmpty
+                                  ? SystemMouseCursors.basic
+                                  : SystemMouseCursors.click,
+                              child: GestureDetector(
+                                onTap: senderUid.isEmpty
+                                    ? null
+                                    : () => Navigator.of(context).push(
+                                        AppMotion.route(
+                                          builder: (_) => PublicProfileScreen(
+                                            uid: senderUid,
+                                          ),
+                                        ),
+                                      ),
+                                child: Padding(
+                                  padding: const EdgeInsets.only(
+                                    right: 8,
+                                    bottom: 10,
+                                  ),
+                                  child: UserAvatar(profile: profile, size: 32),
+                                ),
+                              ),
+                            ),
+                            Flexible(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.only(
+                                      left: 4,
+                                      bottom: 4,
+                                    ),
+                                    child: Text(
+                                      senderName,
+                                      style: Mi.caption().copyWith(
+                                        color: dark ? Colors.white70 : Mi.sub,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  bubble,
+                                ],
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+      ),
     );
   }
 

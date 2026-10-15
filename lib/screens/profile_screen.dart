@@ -729,6 +729,12 @@ class _FriendTools extends StatefulWidget {
 class _FriendToolsState extends State<_FriendTools> {
   final _uid = TextEditingController();
   bool _busy = false;
+  late Future<List<Map<String, dynamic>>> _recommendations;
+
+  @override
+  void initState() { super.initState(); _recommendations = widget.service.friendsWithSharedTaste(); }
+
+  void _refreshRecommendations() => setState(() => _recommendations = widget.service.friendsWithSharedTaste());
 
   @override
   void dispose() { _uid.dispose(); super.dispose(); }
@@ -738,7 +744,7 @@ class _FriendToolsState extends State<_FriendTools> {
     try {
       final result = await widget.service.addFriendByUid(_uid.text);
       if (!mounted) return;
-      miSnack(context, result == null ? 'UID not found.' : result == 'already' ? 'Already friends.' : 'Friend request sent.');
+      miSnack(context, result == null ? 'UID not found.' : result == 'already' ? 'Already friends.' : result == 'disabled' ? 'This user does not accept friend requests.' : result == 'blocked' ? 'Unblock this user before sending a request.' : 'Friend request sent.');
       if (result != null && result != 'already') _uid.clear();
     } catch (_) {
       if (mounted) miSnack(context, 'Could not send request.');
@@ -752,6 +758,21 @@ class _FriendToolsState extends State<_FriendTools> {
     const MiSectionHeader(title: 'Add friends'),
     const SizedBox(height: 10),
     Container(padding: const EdgeInsets.all(12), decoration: Mi.card(), child: Row(children: [Expanded(child: TextField(controller: _uid, decoration: const InputDecoration(hintText: 'Enter a friend UID', isDense: true, border: OutlineInputBorder()))), const SizedBox(width: 8), FilledButton(onPressed: _busy ? null : _add, child: const Text('Add'))])),
+    const SizedBox(height: 18),
+    Row(children: [const Expanded(child: MiSectionHeader(title: 'Similar anime taste')), IconButton(onPressed: _refreshRecommendations, tooltip: 'Refresh recommendations', icon: const Icon(Icons.refresh_rounded))]),
+    FutureBuilder<List<Map<String, dynamic>>>(future: _recommendations, builder: (context, snapshot) {
+      if (!snapshot.hasData) return Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Turn on taste sharing in Settings to get suggestions.', style: Mi.caption()));
+      final users = snapshot.data!;
+      if (users.isEmpty) return Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('No matching fans yet. Add anime to Favorites and enable taste sharing in Settings.', style: Mi.caption()));
+      return Column(children: [for (final user in users.take(6)) ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: FriendAvatar(uid: user['uid'] as String, name: user['displayName'] as String? ?? 'Anime Fan', size: 40),
+        title: Text(user['displayName'] as String? ?? 'Anime Fan', style: Mi.body(weight: FontWeight.w700)),
+        subtitle: Text('${user['sharedAnimeCount']} shared favorites', style: Mi.caption()),
+        trailing: IconButton(tooltip: 'Send friend request', onPressed: () async { final result = await widget.service.addFriendByUid(user['uid'] as String); if (context.mounted) miSnack(context, result == 'already' ? 'Already friends.' : result == 'disabled' ? 'Friend requests are turned off.' : 'Friend request sent.'); _refreshRecommendations(); }, icon: const Icon(Icons.person_add_alt_1_rounded, color: Mi.accent)),
+        onTap: () => Navigator.of(context).push(AppMotion.route(builder: (_) => PublicProfileScreen(uid: user['uid'] as String))),
+      )]);
+    }),
     const SizedBox(height: 18),
     const MiSectionHeader(title: 'Friend requests'),
     const SizedBox(height: 8),
